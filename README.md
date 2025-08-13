@@ -97,10 +97,14 @@ multi-ai remove ~/code/my-project feature-branch --tmux
 ## Terminal Layout
 
 ### iTerm2 Mode (Default)
-- Creates one tab per AI application
-- Each tab has horizontal split (top/bottom)
-- Top pane runs the AI tool
-- Bottom pane provides shell access
+- Creates a single tab with all AI applications
+- Column-based layout: each AI app gets a vertical column with 2 panes
+  - 1 app: 1x2 layout (1 column, 2 rows)
+  - 2 apps: 2x2 layout (2 columns, each with 2 rows)  
+  - 3 apps: 3x2 layout (3 columns, each with 2 rows)
+  - 4 apps: 4x2 layout (4 columns, each with 2 rows)
+- Top pane in each column: runs the AI tool
+- Bottom pane in each column: shell for manual commands
 
 ### Tmux Mode
 - Creates a single tmux session named `<project>-<branch-prefix>`

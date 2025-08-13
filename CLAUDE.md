@@ -13,7 +13,7 @@ Multi-AI CLI is a Rust tool that manages multiple AI development environments us
 - Minor version (x.N.x) for new features
 - Major version (N.x.x) for breaking changes
 
-Current version: 0.4.0
+Current version: 0.5.0
 
 ## Common Commands
 
@@ -61,8 +61,9 @@ cargo fmt      # Format code according to Rust standards
    - Remove worktrees during cleanup
 
 4. **iterm2.rs**: `ITerm2Manager` handles iTerm2 automation (default):
-   - Creates one tab per AI app
-   - Each tab has horizontal split (top/bottom)
+   - Creates a single tab with all AI apps
+   - Each AI app gets horizontal split (top/bottom panes)
+   - Commands use `cd <path> && <command>` chaining for proper directory navigation
    - Top pane launches the AI tool with custom command
    - Bottom pane provides shell in worktree directory
 
