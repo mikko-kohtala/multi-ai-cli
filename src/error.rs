@@ -20,6 +20,9 @@ pub enum MultiAiError {
     #[error("Tmux error: {0}")]
     Tmux(String),
     
+    #[error("iTerm2 error: {0}")]
+    ITerm2(String),
+    
     #[error("Project not found: {0}")]
     ProjectNotFound(String),
     

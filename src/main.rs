@@ -1,13 +1,15 @@
 mod config;
 mod error;
+mod iterm2;
 mod tmux;
 mod worktree;
 
 use clap::Parser;
-use config::{ProjectConfig, UserConfig};
+use config::ProjectConfig;
 use error::{MultiAiError, Result};
+use iterm2::ITerm2Manager;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tmux::TmuxManager;
 use worktree::WorktreeManager;
 
@@ -23,8 +25,8 @@ struct Args {
     #[command(subcommand)]
     command: Option<Command>,
     
-    #[arg(help = "Project directory name (e.g., 'kuntoon')")]
-    project: Option<String>,
+    #[arg(help = "Path to project directory")]
+    project_path: Option<String>,
 
     #[arg(help = "Branch prefix (e.g., 'vercel-theme')")]
     branch_prefix: Option<String>,
@@ -32,22 +34,28 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum Command {
-    #[command(about = "Create worktrees and tmux session for multiple AI tools")]
+    #[command(about = "Create worktrees and session for multiple AI tools")]
     Create {
-        #[arg(help = "Project directory name")]
-        project: String,
+        #[arg(help = "Path to project directory")]
+        project_path: String,
         
         #[arg(help = "Branch prefix for the worktrees")]
         branch_prefix: String,
+        
+        #[arg(long, help = "Use tmux instead of iTerm2")]
+        tmux: bool,
     },
     
-    #[command(about = "Remove worktrees and tmux session for a branch prefix")]
+    #[command(about = "Remove worktrees and session for a branch prefix")]
     Remove {
-        #[arg(help = "Project directory name")]
-        project: String,
+        #[arg(help = "Path to project directory")]
+        project_path: String,
         
         #[arg(help = "Branch prefix to remove")]
         branch_prefix: String,
+        
+        #[arg(long, help = "Remove tmux session instead of iTerm2 tabs")]
+        tmux: bool,
     },
 }
 
@@ -55,37 +63,40 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
-        Some(Command::Create { project, branch_prefix }) => {
-            create_command(project, branch_prefix)
+        Some(Command::Create { project_path, branch_prefix, tmux }) => {
+            create_command(project_path, branch_prefix, tmux)
         }
-        Some(Command::Remove { project, branch_prefix }) => {
-            remove_command(project, branch_prefix)
+        Some(Command::Remove { project_path, branch_prefix, tmux }) => {
+            remove_command(project_path, branch_prefix, tmux)
         }
         None => {
             // Default create command for backwards compatibility
-            let project = args.project.ok_or_else(|| {
-                MultiAiError::Config("Project name is required. Use 'multi-ai --help' for usage information.".to_string())
+            let project_path = args.project_path.ok_or_else(|| {
+                MultiAiError::Config("Project path is required. Use 'multi-ai --help' for usage information.".to_string())
             })?;
             let branch_prefix = args.branch_prefix.ok_or_else(|| {
                 MultiAiError::Config("Branch prefix is required. Use 'multi-ai --help' for usage information.".to_string())
             })?;
-            create_command(project, branch_prefix)
+            create_command(project_path, branch_prefix, false) // Default to iTerm2
         }
     }
 }
 
-fn create_command(project: String, branch_prefix: String) -> Result<()> {
-    let user_config = load_user_config()?;
-    
-    let project_path = user_config.expand_path().join(&project);
+fn create_command(project_path: String, branch_prefix: String, use_tmux: bool) -> Result<()> {
+    let project_path = expand_path(&project_path);
     
     if !project_path.exists() {
         return Err(MultiAiError::ProjectNotFound(format!(
-            "Project '{}' not found at '{}'",
-            project,
+            "Project not found at '{}'",
             project_path.display()
         )));
     }
+
+    let project_name = project_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
+        .to_string();
 
     let project_config = load_project_config(&project_path)?;
 
@@ -100,7 +111,7 @@ fn create_command(project: String, branch_prefix: String) -> Result<()> {
     if !worktree_manager.is_gwt_project() {
         return Err(MultiAiError::Worktree(format!(
             "Project '{}' is not initialized with gwt. Please run 'gwt init' in the project directory first.",
-            project
+            project_name
         )));
     }
 
@@ -122,30 +133,42 @@ fn create_command(project: String, branch_prefix: String) -> Result<()> {
         }
     }
 
-    let tmux_manager = TmuxManager::new(&project, &branch_prefix);
-    
-    println!("\nCreating tmux session '{}-{}'...", project, branch_prefix);
-    tmux_manager.create_session(&project_config.ai_apps, &worktree_paths)?;
-    
-    println!("✓ Tmux session created successfully!");
-    println!("\nAttaching to session...");
-    tmux_manager.attach_session()?;
+    if use_tmux {
+        let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
+        
+        println!("\nCreating tmux session '{}-{}'...", project_name, branch_prefix);
+        tmux_manager.create_session(&project_config.ai_apps, &worktree_paths)?;
+        
+        println!("✓ Tmux session created successfully!");
+        println!("\nAttaching to session...");
+        tmux_manager.attach_session()?;
+    } else {
+        let iterm2_manager = ITerm2Manager::new(&project_name, &branch_prefix);
+        
+        println!("\nCreating iTerm2 tabs for AI applications...");
+        iterm2_manager.create_tabs_per_app(&project_config.ai_apps, &worktree_paths)?;
+        
+        println!("✓ iTerm2 tabs created successfully!");
+    }
 
     Ok(())
 }
 
-fn remove_command(project: String, branch_prefix: String) -> Result<()> {
-    let user_config = load_user_config()?;
-    
-    let project_path = user_config.expand_path().join(&project);
+fn remove_command(project_path: String, branch_prefix: String, use_tmux: bool) -> Result<()> {
+    let project_path = expand_path(&project_path);
     
     if !project_path.exists() {
         return Err(MultiAiError::ProjectNotFound(format!(
-            "Project '{}' not found at '{}'",
-            project,
+            "Project not found at '{}'",
             project_path.display()
         )));
     }
+
+    let project_name = project_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
+        .to_string();
 
     let project_config = load_project_config(&project_path)?;
     let worktree_manager = WorktreeManager::new(project_path.clone());
@@ -156,12 +179,17 @@ fn remove_command(project: String, branch_prefix: String) -> Result<()> {
         ));
     }
 
-    // Kill tmux session first
-    let tmux_manager = TmuxManager::new(&project, &branch_prefix);
-    println!("Removing tmux session '{}-{}'...", project, branch_prefix);
-    match tmux_manager.kill_session() {
-        Ok(_) => println!("  ✓ Tmux session removed"),
-        Err(e) => eprintln!("  ⚠ Failed to remove tmux session: {}", e),
+    if use_tmux {
+        // Kill tmux session
+        let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
+        println!("Removing tmux session '{}-{}'...", project_name, branch_prefix);
+        match tmux_manager.kill_session() {
+            Ok(_) => println!("  ✓ Tmux session removed"),
+            Err(e) => eprintln!("  ⚠ Failed to remove tmux session: {}", e),
+        }
+    } else {
+        // For iTerm2, we can't programmatically close tabs, just notify the user
+        println!("Please manually close the iTerm2 tabs for '{}-{}'", project_name, branch_prefix);
     }
 
     // Remove worktrees for each AI app
@@ -177,23 +205,6 @@ fn remove_command(project: String, branch_prefix: String) -> Result<()> {
 
     println!("\n✓ Cleanup completed!");
     Ok(())
-}
-
-fn load_user_config() -> Result<UserConfig> {
-    let config_path = UserConfig::config_path();
-    
-    if !config_path.exists() {
-        return Err(MultiAiError::Config(format!(
-            "User configuration not found at '{}'. Please create it with your code_root path.",
-            config_path.display()
-        )));
-    }
-
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| MultiAiError::Config(format!("Failed to read user config: {}", e)))?;
-    
-    UserConfig::from_json(&content)
-        .map_err(|e| MultiAiError::Config(format!("Failed to parse user config: {}", e)))
 }
 
 fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
@@ -217,4 +228,8 @@ fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
     
     ProjectConfig::from_json(&content)
         .map_err(|e| MultiAiError::Config(format!("Failed to parse project config: {}", e)))
+}
+
+fn expand_path(path: &str) -> PathBuf {
+    PathBuf::from(shellexpand::tilde(path).to_string())
 }
