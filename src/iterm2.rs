@@ -39,11 +39,14 @@ tell application "iTerm"
                 applescript.push_str(&format!(
                     r#"
             -- Single app: {} (1x2 layout)
+            -- Wait for shell to initialize
+            delay 2
             write text "cd {} && {}"
             
             -- Split horizontally for shell
             set shellPane to (split horizontally with default profile)
             tell shellPane
+                delay 1
                 write text "cd {}"
             end tell"#,
                     app.as_str(), path, app.command(), path
@@ -57,26 +60,38 @@ tell application "iTerm"
                 applescript.push_str(&format!(
                     r#"
             -- Two apps: 2x2 layout
+            -- Create the basic 2x2 grid first
+            
+            -- Split vertically to create two columns
+            set rightColumn to (split vertically with default profile)
+            
+            -- Split each column horizontally
+            set leftBottom to (split horizontally with default profile)
+            tell rightColumn
+                set rightBottom to (split horizontally with default profile)
+            end tell
+            
+            -- Now populate each pane
             -- First app: {} (left column, top)
+            delay 2
             write text "cd {} && {}"
             
-            -- Split horizontally for first app's shell (left column, bottom)
-            set leftShell to (split horizontally with default profile)
-            tell leftShell
+            -- First app shell (left column, bottom)
+            tell leftBottom
+                delay 1
                 write text "cd {}"
             end tell
             
-            -- Split vertically from top-left to create right column
-            set rightColumn to (split vertically with default profile)
+            -- Second app: {} (right column, top)
             tell rightColumn
-                -- Second app: {} (right column, top)
+                delay 1
                 write text "cd {} && {}"
-                
-                -- Split horizontally for second app's shell (right column, bottom)
-                set rightShell to (split horizontally with default profile)
-                tell rightShell
-                    write text "cd {}"
-                end tell
+            end tell
+            
+            -- Second app shell (right column, bottom)
+            tell rightBottom
+                delay 1
+                write text "cd {}"
             end tell"#,
                     app1.as_str(), path1, app1.command(), path1,
                     app2.as_str(), path2, app2.command(), path2
@@ -91,39 +106,51 @@ tell application "iTerm"
                 applescript.push_str(&format!(
                     r#"
             -- Three apps: 3x2 layout
-            -- First app: {} (left column, top)
+            -- Create 3 columns first
+            set col2 to (split vertically with default profile)
+            tell col2
+                set col3 to (split vertically with default profile)
+            end tell
+            
+            -- Split each column horizontally
+            set col1Bottom to (split horizontally with default profile)
+            tell col2
+                set col2Bottom to (split horizontally with default profile)
+            end tell
+            tell col3
+                set col3Bottom to (split horizontally with default profile)
+            end tell
+            
+            -- Populate panes
+            -- First app: {} (column 1, top)
+            delay 2
             write text "cd {} && {}"
             
-            -- Split horizontally for first app's shell
-            set leftShell to (split horizontally with default profile)
-            tell leftShell
+            tell col1Bottom
+                delay 1
                 write text "cd {}"
             end tell
             
-            -- Split vertically from top-left to create middle column
-            set middleColumn to (split vertically with default profile)
-            tell middleColumn
-                -- Second app: {} (middle column, top)
+            -- Second app: {} (column 2, top)
+            tell col2
+                delay 1
                 write text "cd {} && {}"
-                
-                -- Split horizontally for second app's shell
-                set middleShell to (split horizontally with default profile)
-                tell middleShell
-                    write text "cd {}"
-                end tell
-                
-                -- Split vertically from middle-top to create right column
-                set rightColumn to (split vertically with default profile)
-                tell rightColumn
-                    -- Third app: {} (right column, top)
-                    write text "cd {} && {}"
-                    
-                    -- Split horizontally for third app's shell
-                    set rightShell to (split horizontally with default profile)
-                    tell rightShell
-                        write text "cd {}"
-                    end tell
-                end tell
+            end tell
+            
+            tell col2Bottom
+                delay 1
+                write text "cd {}"
+            end tell
+            
+            -- Third app: {} (column 3, top)
+            tell col3
+                delay 1
+                write text "cd {} && {}"
+            end tell
+            
+            tell col3Bottom
+                delay 1
+                write text "cd {}"
             end tell"#,
                     app1.as_str(), path1, app1.command(), path1,
                     app2.as_str(), path2, app2.command(), path2,
@@ -140,52 +167,68 @@ tell application "iTerm"
                 applescript.push_str(&format!(
                     r#"
             -- Four apps: 4x2 layout
-            -- First app: {} (first column, top)
+            -- First create 4 columns
+            set col2 to (split vertically with default profile)
+            tell col2
+                set col3 to (split vertically with default profile)
+                tell col3
+                    set col4 to (split vertically with default profile)
+                end tell
+            end tell
+            
+            -- Now split each column horizontally to create 8 panes total
+            set col1Bottom to (split horizontally with default profile)
+            tell col2
+                set col2Bottom to (split horizontally with default profile)
+            end tell
+            tell col3
+                set col3Bottom to (split horizontally with default profile)
+            end tell
+            tell col4
+                set col4Bottom to (split horizontally with default profile)
+            end tell
+            
+            -- Wait for shells to initialize and populate each pane
+            -- First app: {} (column 1)
+            delay 2
             write text "cd {} && {}"
             
-            -- Split horizontally for first app's shell
-            set col1Shell to (split horizontally with default profile)
-            tell col1Shell
+            tell col1Bottom
+                delay 1
                 write text "cd {}"
             end tell
             
-            -- Split vertically from top of column 1 to create column 2
-            set col2Top to (split vertically with default profile)
-            tell col2Top
-                -- Second app: {} (second column, top)
+            -- Second app: {} (column 2)
+            tell col2
+                delay 1
                 write text "cd {} && {}"
-                
-                -- Split horizontally for second app's shell
-                set col2Shell to (split horizontally with default profile)
-                tell col2Shell
-                    write text "cd {}"
-                end tell
-                
-                -- Split vertically from top of column 2 to create column 3
-                set col3Top to (split vertically with default profile)
-                tell col3Top
-                    -- Third app: {} (third column, top)
-                    write text "cd {} && {}"
-                    
-                    -- Split horizontally for third app's shell
-                    set col3Shell to (split horizontally with default profile)
-                    tell col3Shell
-                        write text "cd {}"
-                    end tell
-                    
-                    -- Split vertically from top of column 3 to create column 4
-                    set col4Top to (split vertically with default profile)
-                    tell col4Top
-                        -- Fourth app: {} (fourth column, top)
-                        write text "cd {} && {}"
-                        
-                        -- Split horizontally for fourth app's shell
-                        set col4Shell to (split horizontally with default profile)
-                        tell col4Shell
-                            write text "cd {}"
-                        end tell
-                    end tell
-                end tell
+            end tell
+            
+            tell col2Bottom
+                delay 1
+                write text "cd {}"
+            end tell
+            
+            -- Third app: {} (column 3)
+            tell col3
+                delay 1
+                write text "cd {} && {}"
+            end tell
+            
+            tell col3Bottom
+                delay 1
+                write text "cd {}"
+            end tell
+            
+            -- Fourth app: {} (column 4)
+            tell col4
+                delay 1
+                write text "cd {} && {}"
+            end tell
+            
+            tell col4Bottom
+                delay 1
+                write text "cd {}"
             end tell"#,
                     app1.as_str(), path1, app1.command(), path1,
                     app2.as_str(), path2, app2.command(), path2,
