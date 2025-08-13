@@ -1,6 +1,8 @@
 use crate::config::AiApp;
 use crate::error::{MultiAiError, Result};
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 
 pub struct TmuxManager {
     session_name: String,
@@ -101,12 +103,15 @@ impl TmuxManager {
             return Err(MultiAiError::Tmux(format!("Failed to split window: {}", stderr)));
         }
 
-        // Launch the AI app in the left pane (pane 0)
+        // Wait for shell to initialize
+        thread::sleep(Duration::from_millis(500));
+
+        // Launch the AI app in the left pane (pane 1)
         let launch_command = format!("cd {} && {}", worktree_path, ai_app.command());
         let output = Command::new("tmux")
             .args([
                 "send-keys",
-                "-t", &format!("{}:{}.0", self.session_name, ai_app.as_str()),
+                "-t", &format!("{}:{}.1", self.session_name, ai_app.as_str()),
                 &launch_command,
                 "Enter",
             ])
