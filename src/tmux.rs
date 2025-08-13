@@ -84,6 +84,7 @@ impl TmuxManager {
     }
 
     fn split_window_for_ai(&self, ai_app: &AiApp, worktree_path: &str) -> Result<()> {
+        // Split the window horizontally (creates pane 1 on the right, keeps focus on pane 0)
         let output = Command::new("tmux")
             .args([
                 "split-window",
@@ -100,6 +101,7 @@ impl TmuxManager {
             return Err(MultiAiError::Tmux(format!("Failed to split window: {}", stderr)));
         }
 
+        // Launch the AI app in the left pane (pane 0)
         let launch_command = format!("cd {} && {}", worktree_path, ai_app.command());
         let output = Command::new("tmux")
             .args([
@@ -153,6 +155,29 @@ impl TmuxManager {
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to check session: {}", e)))?;
 
         Ok(output.status.success())
+    }
+
+    pub fn kill_session(&self) -> Result<()> {
+        if !self.is_tmux_installed() {
+            return Err(MultiAiError::Tmux("tmux is not installed".to_string()));
+        }
+
+        if !self.session_exists()? {
+            // Session doesn't exist, which is fine for remove command
+            return Ok(());
+        }
+
+        let output = Command::new("tmux")
+            .args(["kill-session", "-t", &self.session_name])
+            .output()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to kill tmux session: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(MultiAiError::Tmux(format!("Failed to kill session: {}", stderr)));
+        }
+
+        Ok(())
     }
 
     fn is_tmux_installed(&self) -> bool {

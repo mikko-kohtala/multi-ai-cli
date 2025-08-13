@@ -1,6 +1,7 @@
 use crate::error::{MultiAiError, Result};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader};
 
 pub struct WorktreeManager {
     project_path: PathBuf,
@@ -20,18 +21,45 @@ impl WorktreeManager {
             ));
         }
 
-        let output = Command::new("gwt")
+        let mut child = Command::new("gwt")
             .arg("add")
             .arg(branch_name)
             .current_dir(&self.project_path)
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to execute gwt: {}", e)))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        // Stream stdout
+        if let Some(stdout) = child.stdout.take() {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    println!("    {}", line);
+                }
+            }
+        }
+
+        // Wait for the process to complete and check status
+        let status = child.wait()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to wait for gwt: {}", e)))?;
+
+        if !status.success() {
+            // Capture any stderr output
+            let mut stderr_msg = String::new();
+            if let Some(stderr) = child.stderr.take() {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        stderr_msg.push_str(&line);
+                        stderr_msg.push('\n');
+                    }
+                }
+            }
+            
             return Err(MultiAiError::Worktree(format!(
                 "Failed to create worktree: {}",
-                stderr
+                if stderr_msg.is_empty() { "Unknown error" } else { &stderr_msg }
             )));
         }
 
@@ -44,6 +72,59 @@ impl WorktreeManager {
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)
+    }
+
+    pub fn remove_worktree(&self, branch_name: &str) -> Result<()> {
+        if !self.has_gwt_cli() {
+            return Err(MultiAiError::Worktree(
+                "gwt CLI is not installed or not in PATH".to_string()
+            ));
+        }
+
+        let mut child = Command::new("gwt")
+            .arg("remove")
+            .arg(branch_name)
+            .arg("--force")
+            .current_dir(&self.project_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to execute gwt remove: {}", e)))?;
+
+        // Stream stdout
+        if let Some(stdout) = child.stdout.take() {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    println!("    {}", line);
+                }
+            }
+        }
+
+        // Wait for the process to complete and check status
+        let status = child.wait()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to wait for gwt remove: {}", e)))?;
+
+        if !status.success() {
+            // Capture any stderr output
+            let mut stderr_msg = String::new();
+            if let Some(stderr) = child.stderr.take() {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        stderr_msg.push_str(&line);
+                        stderr_msg.push('\n');
+                    }
+                }
+            }
+            
+            return Err(MultiAiError::Worktree(format!(
+                "Failed to remove worktree: {}",
+                if stderr_msg.is_empty() { "Unknown error" } else { &stderr_msg }
+            )));
+        }
+
+        Ok(())
     }
 
     pub fn is_gwt_project(&self) -> bool {
