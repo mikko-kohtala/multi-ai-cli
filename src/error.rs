@@ -8,11 +8,11 @@ pub enum MultiAiError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     
-    #[error("YAML parsing error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
-    
     #[error("JSON parsing error: {0}")]
     Json(#[from] serde_json::Error),
+    
+    #[error("JSONC parsing error: {0}")]
+    JsonC(#[from] jsonc_parser::errors::ParseError),
     
     #[error("Git worktree error: {0}")]
     Worktree(String),

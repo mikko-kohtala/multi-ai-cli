@@ -18,25 +18,40 @@ cargo install --path .
 ## Configuration
 
 ### 1. User Configuration
-Create `~/.config/multi-ai/settings.json`:
+Create `~/.config/multi-ai/settings.jsonc`:
 
-```json
+```jsonc
 {
+  // code_root: The base directory where all your code projects are located
+  // This path will be expanded (~ will be replaced with your home directory)
+  // Example: "~/code/mikko" becomes "/Users/username/code/mikko"
   "code_root": "~/code/mikko"
 }
 ```
 
-This defines the root directory where your projects are located.
+This defines the root directory where your projects are located. The path supports tilde expansion for the home directory.
 
 ### 2. Project Configuration
-In each project directory, create `multi-ai-config.yaml`:
+In each project directory, create `multi-ai-config.json` or `multi-ai-config.jsonc`:
 
-```yaml
-ai_apps:
-  - claude
-  - codex
-  - amp
-  - gemini
+**JSON format** (`multi-ai-config.json`):
+```json
+{
+  "ai_apps": ["claude", "codex", "amp", "gemini"]
+}
+```
+
+**JSONC format** (`multi-ai-config.jsonc`) - supports comments:
+```jsonc
+{
+  // List of AI apps to set up for this project
+  "ai_apps": [
+    "claude",
+    "codex"
+    // "amp",  // Uncomment to enable
+    // "gemini"
+  ]
+}
 ```
 
 This defines which AI tools should be set up for the project.
@@ -74,9 +89,9 @@ This will:
 ## Error Handling
 
 The CLI will validate:
-- User configuration exists at `~/.config/multi-ai/settings.json`
+- User configuration exists at `~/.config/multi-ai/settings.jsonc`
 - Project exists in the configured code root
-- Project has `multi-ai-config.yaml`
+- Project has `multi-ai-config.json` or `multi-ai-config.jsonc`
 - Project is a git repository
 - gwt CLI is installed
 - tmux is installed

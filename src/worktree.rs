@@ -46,7 +46,19 @@ impl WorktreeManager {
             .unwrap_or(false)
     }
 
-    pub fn is_git_repo(&self) -> bool {
-        self.project_path.join(".git").exists()
+    pub fn is_gwt_project(&self) -> bool {
+        // Check if git-worktree-config.yaml exists (gwt configuration file)
+        let gwt_config_yaml = self.project_path.join("git-worktree-config.yaml");
+        if gwt_config_yaml.exists() {
+            return true;
+        }
+        
+        // Also try running gwt list to see if it's a valid gwt project
+        Command::new("gwt")
+            .arg("list")
+            .current_dir(&self.project_path)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
     }
 }

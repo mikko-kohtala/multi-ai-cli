@@ -1,0 +1,5 @@
+{
+  // code_root: The base directory where all your code projects are located
+  // Example: "~/code" or "/Users/username/code"
+  "code_root": "~/code/mikko"
+}

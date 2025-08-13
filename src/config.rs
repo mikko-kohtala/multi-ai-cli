@@ -43,14 +43,18 @@ pub struct UserConfig {
 impl ProjectConfig {
     pub fn from_json(content: &str) -> anyhow::Result<Self> {
         // Parse JSONC (JSON with Comments) which also handles regular JSON
-        let parsed = jsonc_parser::parse_to_serde_value(content, &Default::default())?;
+        let parsed = jsonc_parser::parse_to_serde_value(content, &Default::default())?
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse JSON/JSONC content"))?;
         Ok(serde_json::from_value(parsed)?)
     }
 }
 
 impl UserConfig {
     pub fn from_json(content: &str) -> anyhow::Result<Self> {
-        Ok(serde_json::from_str(content)?)
+        // Parse JSONC (JSON with Comments) which also handles regular JSON
+        let parsed = jsonc_parser::parse_to_serde_value(content, &Default::default())?
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse user config JSON/JSONC content"))?;
+        Ok(serde_json::from_value(parsed)?)
     }
 
     pub fn config_path() -> PathBuf {
@@ -58,7 +62,7 @@ impl UserConfig {
             .expect("Could not find home directory")
             .join(".config")
             .join("multi-ai")
-            .join("settings.json")
+            .join("settings.jsonc")
     }
 
     pub fn expand_path(&self) -> PathBuf {

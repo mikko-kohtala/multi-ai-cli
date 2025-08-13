@@ -41,17 +41,17 @@ fn main() -> Result<()> {
 
     let worktree_manager = WorktreeManager::new(project_path.clone());
     
-    if !worktree_manager.is_git_repo() {
-        return Err(MultiAiError::Worktree(format!(
-            "Project '{}' is not a git repository",
-            args.project
-        )));
-    }
-
     if !worktree_manager.has_gwt_cli() {
         return Err(MultiAiError::Worktree(
             "gwt CLI is not installed. Please install from https://github.com/mikko-kohtala/git-worktree-cli".to_string()
         ));
+    }
+    
+    if !worktree_manager.is_gwt_project() {
+        return Err(MultiAiError::Worktree(format!(
+            "Project '{}' is not initialized with gwt. Please run 'gwt init' in the project directory first.",
+            args.project
+        )));
     }
 
     let mut worktree_paths = Vec::new();
