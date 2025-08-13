@@ -13,7 +13,7 @@ Multi-AI CLI is a Rust tool that manages multiple AI development environments us
 - Minor version (x.N.x) for new features
 - Major version (N.x.x) for breaking changes
 
-Current version: 0.5.1
+Current version: 0.6.0
 
 ## Common Commands
 

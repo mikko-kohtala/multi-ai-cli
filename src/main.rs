@@ -10,6 +10,8 @@ use error::{MultiAiError, Result};
 use iterm2::ITerm2Manager;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use tmux::TmuxManager;
 use worktree::WorktreeManager;
 
@@ -115,23 +117,62 @@ fn create_command(project_path: String, branch_prefix: String, use_tmux: bool) -
         )));
     }
 
-    let mut worktree_paths = Vec::new();
+    // Create worktrees in parallel
+    println!("Creating worktrees in parallel...");
+    let worktree_paths = Arc::new(Mutex::new(Vec::new()));
+    let errors = Arc::new(Mutex::new(Vec::new()));
+    
+    let mut handles = vec![];
     
     for ai_app in &project_config.ai_apps {
         let branch_name = format!("{}-{}", branch_prefix, ai_app.as_str());
-        println!("Creating worktree for {} with branch '{}'...", ai_app.as_str(), branch_name);
+        let ai_app_clone = ai_app.clone();
+        let project_path_clone = project_path.clone();
+        let worktree_paths_clone = Arc::clone(&worktree_paths);
+        let errors_clone = Arc::clone(&errors);
         
-        match worktree_manager.add_worktree(&branch_name) {
-            Ok(worktree_path) => {
-                println!("  ✓ Created worktree at: {}", worktree_path.display());
-                worktree_paths.push((ai_app.clone(), worktree_path.to_string_lossy().to_string()));
+        let handle = thread::spawn(move || {
+            println!("  Creating worktree for {} with branch '{}'...", ai_app_clone.as_str(), branch_name);
+            
+            let worktree_manager = WorktreeManager::new(project_path_clone);
+            match worktree_manager.add_worktree(&branch_name) {
+                Ok(worktree_path) => {
+                    println!("  ✓ Created worktree for {}: {}", ai_app_clone.as_str(), worktree_path.display());
+                    let mut paths = worktree_paths_clone.lock().unwrap();
+                    paths.push((ai_app_clone, worktree_path.to_string_lossy().to_string()));
+                }
+                Err(e) => {
+                    eprintln!("  ✗ Failed to create worktree for {}: {}", ai_app_clone.as_str(), e);
+                    let mut errs = errors_clone.lock().unwrap();
+                    errs.push(format!("{}: {}", ai_app_clone.as_str(), e));
+                }
             }
-            Err(e) => {
-                eprintln!("  ✗ Failed to create worktree: {}", e);
-                return Err(e);
-            }
-        }
+        });
+        
+        handles.push(handle);
     }
+    
+    // Wait for all threads to complete
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+    
+    // Check if there were any errors
+    let errors = errors.lock().unwrap();
+    if !errors.is_empty() {
+        return Err(MultiAiError::Worktree(format!(
+            "Failed to create some worktrees:\n{}",
+            errors.join("\n")
+        )));
+    }
+    
+    // Get the final worktree paths, sorted by app order
+    let mut worktree_paths = worktree_paths.lock().unwrap().clone();
+    worktree_paths.sort_by_key(|a| {
+        project_config.ai_apps.iter().position(|app| app.name == a.0.name).unwrap_or(0)
+    });
+    
+    println!("✓ All worktrees created successfully!");
 
     if use_tmux {
         let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
