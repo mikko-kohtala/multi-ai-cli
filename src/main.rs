@@ -41,8 +41,8 @@ enum Command {
     #[command(about = "Initialize multi-ai-config.jsonc file interactively")]
     Init,
     
-    #[command(about = "Create worktrees and session for multiple AI tools")]
-    Create {
+    #[command(about = "Add worktrees and session for multiple AI tools")]
+    Add {
         #[arg(help = "Path to project directory")]
         project_path: String,
         
@@ -73,21 +73,16 @@ fn main() -> Result<()> {
         Some(Command::Init) => {
             init::run_init()
         }
-        Some(Command::Create { project_path, branch_prefix, tmux }) => {
+        Some(Command::Add { project_path, branch_prefix, tmux }) => {
             create_command(project_path, branch_prefix, tmux)
         }
         Some(Command::Remove { project_path, branch_prefix, tmux }) => {
             remove_command(project_path, branch_prefix, tmux)
         }
         None => {
-            // Default create command for backwards compatibility
-            let project_path = args.project_path.ok_or_else(|| {
-                MultiAiError::Config("Project path is required. Use 'mai --help' for usage information.".to_string())
-            })?;
-            let branch_prefix = args.branch_prefix.ok_or_else(|| {
-                MultiAiError::Config("Branch prefix is required. Use 'mai --help' for usage information.".to_string())
-            })?;
-            create_command(project_path, branch_prefix, false) // Default to iTerm2
+            eprintln!("Error: Command required. Use 'mai add <project-path> <branch-prefix>' or 'mai remove <project-path> <branch-prefix>'");
+            eprintln!("Run 'mai --help' for more information.");
+            std::process::exit(1);
         }
     }
 }
@@ -299,7 +294,11 @@ fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
 }
 
 fn expand_path(path: &str) -> PathBuf {
-    PathBuf::from(shellexpand::tilde(path).to_string())
+    if path == "." {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    } else {
+        PathBuf::from(shellexpand::tilde(path).to_string())
+    }
 }
 
 fn ask_confirmation(question: &str) -> Result<bool> {
