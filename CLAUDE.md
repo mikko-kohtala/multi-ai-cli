@@ -13,7 +13,7 @@ Multi-AI CLI is a Rust tool that manages multiple AI development environments us
 - Minor version (x.N.x) for new features
 - Major version (N.x.x) for breaking changes
 
-Current version: 0.6.0
+Current version: 0.7.0
 
 ## Common Commands
 
@@ -29,8 +29,8 @@ cargo run -- <project-path> <branch-prefix>                    # Run from source
 cargo run -- create <project-path> <branch-prefix>             # Create worktrees and session
 cargo run -- create <project-path> <branch-prefix> --tmux      # Use tmux instead of iTerm2
 cargo run -- remove <project-path> <branch-prefix>             # Remove worktrees and session
-./target/debug/multi-ai <project-path> <branch-prefix>         # Run debug binary
-./target/release/multi-ai <project-path> <branch-prefix>       # Run release binary
+./target/debug/mai <project-path> <branch-prefix>              # Run debug binary
+./target/release/mai <project-path> <branch-prefix>            # Run release binary
 ```
 
 ### Test

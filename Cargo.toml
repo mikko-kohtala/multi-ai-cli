@@ -1,10 +1,10 @@
 [package]
 name = "multi-ai"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 
 [[bin]]
-name = "multi-ai"
+name = "mai"
 path = "src/main.rs"
 
 [dependencies]
@@ -16,3 +16,4 @@ anyhow = "1.0"
 thiserror = "2.0"
 dirs = "6.0"
 shellexpand = "3.1"
+crossterm = "0.28"

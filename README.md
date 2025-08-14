@@ -26,12 +26,12 @@ Or build from source:
 
 ```bash
 cargo build --release
-# Binary will be at ./target/release/multi-ai
+# Binary will be at ./target/release/mai
 ```
 
 ## Configuration
 
-Create a `multi-ai-config.jsonc` file in your project root with your AI applications and their commands:
+Create a `mai-config.jsonc` file in your project root with your AI applications and their commands:
 
 ```jsonc
 {
@@ -67,15 +67,15 @@ Create a `multi-ai-config.jsonc` file in your project root with your AI applicat
 
 **Default (iTerm2):**
 ```bash
-multi-ai create ~/code/my-project feature-branch
+mai create ~/code/my-project feature-branch
 
 # Or using the shorthand:
-multi-ai ~/code/my-project feature-branch
+mai ~/code/my-project feature-branch
 ```
 
 **With tmux:**
 ```bash
-multi-ai create ~/code/my-project feature-branch --tmux
+mai create ~/code/my-project feature-branch --tmux
 ```
 
 This will:
@@ -88,10 +88,10 @@ This will:
 ### Remove worktrees and cleanup
 
 ```bash
-multi-ai remove ~/code/my-project feature-branch
+mai remove ~/code/my-project feature-branch
 
 # With tmux:
-multi-ai remove ~/code/my-project feature-branch --tmux
+mai remove ~/code/my-project feature-branch --tmux
 ```
 
 ## Terminal Layout
@@ -121,7 +121,7 @@ gwt init
 
 2. Create the configuration file:
 ```bash
-cat > multi-ai-config.jsonc << 'EOF'
+cat > mai-config.jsonc << 'EOF'
 {
   "ai_apps": [
     {
@@ -139,14 +139,14 @@ EOF
 
 3. Create AI development environments:
 ```bash
-multi-ai create ~/code/my-project new-feature
+mai create ~/code/my-project new-feature
 ```
 
 4. Work on your feature across multiple AI tools
 
 5. Clean up when done:
 ```bash
-multi-ai remove ~/code/my-project new-feature
+mai remove ~/code/my-project new-feature
 ```
 
 ## Tmux Navigation

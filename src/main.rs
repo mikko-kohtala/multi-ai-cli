@@ -1,5 +1,6 @@
 mod config;
 mod error;
+mod init;
 mod iterm2;
 mod tmux;
 mod worktree;
@@ -9,6 +10,7 @@ use config::ProjectConfig;
 use error::{MultiAiError, Result};
 use iterm2::ITerm2Manager;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -16,7 +18,7 @@ use tmux::TmuxManager;
 use worktree::WorktreeManager;
 
 #[derive(Parser, Debug)]
-#[command(name = "multi-ai")]
+#[command(name = "mai")]
 #[command(version, about = "Multi-AI workspace manager with git worktrees", long_about = None)]
 #[command(author = "Mikko Kohtala")]
 #[command(disable_version_flag = true)]
@@ -36,6 +38,9 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum Command {
+    #[command(about = "Initialize multi-ai-config.jsonc file interactively")]
+    Init,
+    
     #[command(about = "Create worktrees and session for multiple AI tools")]
     Create {
         #[arg(help = "Path to project directory")]
@@ -65,6 +70,9 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
+        Some(Command::Init) => {
+            init::run_init()
+        }
         Some(Command::Create { project_path, branch_prefix, tmux }) => {
             create_command(project_path, branch_prefix, tmux)
         }
@@ -74,10 +82,10 @@ fn main() -> Result<()> {
         None => {
             // Default create command for backwards compatibility
             let project_path = args.project_path.ok_or_else(|| {
-                MultiAiError::Config("Project path is required. Use 'multi-ai --help' for usage information.".to_string())
+                MultiAiError::Config("Project path is required. Use 'mai --help' for usage information.".to_string())
             })?;
             let branch_prefix = args.branch_prefix.ok_or_else(|| {
-                MultiAiError::Config("Branch prefix is required. Use 'multi-ai --help' for usage information.".to_string())
+                MultiAiError::Config("Branch prefix is required. Use 'mai --help' for usage information.".to_string())
             })?;
             create_command(project_path, branch_prefix, false) // Default to iTerm2
         }
@@ -220,6 +228,25 @@ fn remove_command(project_path: String, branch_prefix: String, use_tmux: bool) -
         ));
     }
 
+    // Ask for confirmation
+    println!("⚠️  You are about to remove:");
+    println!("  - Worktrees for branches:");
+    for ai_app in &project_config.ai_apps {
+        let branch_name = format!("{}-{}", branch_prefix, ai_app.as_str());
+        println!("    • {}", branch_name);
+    }
+    if use_tmux {
+        println!("  - Tmux session: {}-{}", project_name, branch_prefix);
+    } else {
+        println!("  - Note: iTerm2 tabs must be closed manually");
+    }
+    println!();
+    
+    if !ask_confirmation("Are you sure you want to remove these worktrees and session?")? {
+        println!("Removal cancelled.");
+        return Ok(());
+    }
+
     if use_tmux {
         // Kill tmux session
         let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
@@ -273,4 +300,20 @@ fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
 
 fn expand_path(path: &str) -> PathBuf {
     PathBuf::from(shellexpand::tilde(path).to_string())
+}
+
+fn ask_confirmation(question: &str) -> Result<bool> {
+    loop {
+        print!("{} [y/n]: ", question);
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        
+        match input.trim().to_lowercase().as_str() {
+            "y" | "yes" => return Ok(true),
+            "n" | "no" => return Ok(false),
+            _ => println!("Please enter 'y' or 'n'"),
+        }
+    }
 }
