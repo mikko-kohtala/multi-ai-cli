@@ -4,7 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Multi-AI CLI is a Rust tool that manages multiple AI development environments using git worktrees and tmux sessions. It automates the setup of separate worktrees for different AI tools (Claude, Codex, Amp, Gemini) and creates organized tmux sessions for each.
+Multi-AI CLI is a Rust tool that manages multiple AI development environments using git worktrees and tmux sessions. It automates the setup of separate worktrees for different AI tools and creates organized tmux or iTerm2 sessions for each.
+
+### Supported AI Tools
+
+The following AI development tools are supported:
+- **claude**: Anthropic's AI assistant (with `--dangerously-skip-permissions` flag for YOLO mode)
+- **gemini**: Google's AI assistant (with `--yolo` flag for YOLO mode)
+- **codex**: GitHub Copilot's AI assistant (with `--ask-for-approval never` flag for YOLO mode)
+- **amp**: AI assistant (with `--dangerously-allow-all` flag for YOLO mode)
+- **opencode**: AI coding assistant (no special flags for YOLO mode)
 
 ## Version Management
 
@@ -12,8 +21,6 @@ Multi-AI CLI is a Rust tool that manages multiple AI development environments us
 - Patch version (x.x.N) for bug fixes and minor improvements
 - Minor version (x.N.x) for new features
 - Major version (N.x.x) for breaking changes
-
-Current version: 0.7.0
 
 ## Common Commands
 

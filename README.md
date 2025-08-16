@@ -1,6 +1,15 @@
 # Multi-AI CLI
 
-A Rust CLI tool that manages multiple AI development environments using git worktrees and iTerm2/tmux sessions. It automates the setup of separate worktrees for different AI tools (Claude, Codex, Amp, Gemini) and creates organized terminal sessions for each.
+A Rust CLI tool that manages multiple AI development environments using git worktrees and iTerm2/tmux sessions. It automates the setup of separate worktrees for different AI tools and creates organized terminal sessions for each.
+
+## Supported AI Tools
+
+The following AI development tools are supported:
+- **claude**: Anthropic's AI assistant (with `--dangerously-skip-permissions` flag for YOLO mode)
+- **gemini**: Google's AI assistant (with `--yolo` flag for YOLO mode)
+- **codex**: GitHub Copilot's AI assistant (with `--ask-for-approval never` flag for YOLO mode)
+- **amp**: AI assistant (with `--dangerously-allow-all` flag for YOLO mode)
+- **opencode**: AI coding assistant (no special flags for YOLO mode)
 
 ## Features
 
@@ -51,6 +60,10 @@ Create a `mai-config.jsonc` file in your project root with your AI applications 
     {
       "name": "amp",
       "command": "amp --dangerously-allow-all"
+    },
+    {
+      "name": "opencode",
+      "command": "opencode"
     }
   ]
 }

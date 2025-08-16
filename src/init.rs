@@ -39,6 +39,11 @@ impl AiService {
             normal_command: "amp",
             yolo_command: "amp --dangerously-allow-all",
         },
+        AiService {
+            name: "opencode",
+            normal_command: "opencode",
+            yolo_command: "opencode",
+        },
     ];
 }
 
