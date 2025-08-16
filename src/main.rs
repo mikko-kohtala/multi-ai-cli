@@ -11,7 +11,7 @@ use error::{MultiAiError, Result};
 use iterm2::ITerm2Manager;
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tmux::TmuxManager;
@@ -43,9 +43,6 @@ enum Command {
     
     #[command(about = "Add worktrees and session for multiple AI tools")]
     Add {
-        #[arg(help = "Path to project directory")]
-        project_path: String,
-        
         #[arg(help = "Branch prefix for the worktrees")]
         branch_prefix: String,
         
@@ -55,9 +52,6 @@ enum Command {
     
     #[command(about = "Remove worktrees and session for a branch prefix")]
     Remove {
-        #[arg(help = "Path to project directory")]
-        project_path: String,
-        
         #[arg(help = "Branch prefix to remove")]
         branch_prefix: String,
         
@@ -73,28 +67,38 @@ fn main() -> Result<()> {
         Some(Command::Init) => {
             init::run_init()
         }
-        Some(Command::Add { project_path, branch_prefix, tmux }) => {
-            create_command(project_path, branch_prefix, tmux)
+        Some(Command::Add { branch_prefix, tmux }) => {
+            create_command(branch_prefix, tmux)
         }
-        Some(Command::Remove { project_path, branch_prefix, tmux }) => {
-            remove_command(project_path, branch_prefix, tmux)
+        Some(Command::Remove { branch_prefix, tmux }) => {
+            remove_command(branch_prefix, tmux)
         }
         None => {
-            eprintln!("Error: Command required. Use 'mai add <project-path> <branch-prefix>' or 'mai remove <project-path> <branch-prefix>'");
+            eprintln!("Error: Command required. Use 'mai add <branch-prefix>' or 'mai remove <branch-prefix>'");
             eprintln!("Run 'mai --help' for more information.");
             std::process::exit(1);
         }
     }
 }
 
-fn create_command(project_path: String, branch_prefix: String, use_tmux: bool) -> Result<()> {
-    let project_path = expand_path(&project_path);
+fn create_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
+    let project_path = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
     
-    if !project_path.exists() {
-        return Err(MultiAiError::ProjectNotFound(format!(
-            "Project not found at '{}'",
-            project_path.display()
-        )));
+    // Check for multi-ai-config.jsonc in current directory
+    let config_path = project_path.join("multi-ai-config.jsonc");
+    if !config_path.exists() {
+        return Err(MultiAiError::Config(
+            "multi-ai-config.jsonc not found in current directory. Please run 'mai add' from a directory containing this file.".to_string()
+        ));
+    }
+    
+    // Check for git-worktree-config.jsonc in current directory
+    let gwt_config_path = project_path.join("git-worktree-config.jsonc");
+    if !gwt_config_path.exists() {
+        return Err(MultiAiError::Config(
+            "git-worktree-config.jsonc not found in current directory. Please ensure this file exists.".to_string()
+        ));
     }
 
     let project_name = project_path
@@ -114,10 +118,9 @@ fn create_command(project_path: String, branch_prefix: String, use_tmux: bool) -
     }
     
     if !worktree_manager.is_gwt_project() {
-        return Err(MultiAiError::Worktree(format!(
-            "Project '{}' is not initialized with gwt. Please run 'gwt init' in the project directory first.",
-            project_name
-        )));
+        return Err(MultiAiError::Worktree(
+            "Current directory is not initialized with gwt. Please ensure git-worktree-config.jsonc exists or run 'gwt init' first.".to_string()
+        ));
     }
 
     // Create worktrees in parallel
@@ -198,14 +201,24 @@ fn create_command(project_path: String, branch_prefix: String, use_tmux: bool) -
     Ok(())
 }
 
-fn remove_command(project_path: String, branch_prefix: String, use_tmux: bool) -> Result<()> {
-    let project_path = expand_path(&project_path);
+fn remove_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
+    let project_path = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
     
-    if !project_path.exists() {
-        return Err(MultiAiError::ProjectNotFound(format!(
-            "Project not found at '{}'",
-            project_path.display()
-        )));
+    // Check for multi-ai-config.jsonc in current directory
+    let config_path = project_path.join("multi-ai-config.jsonc");
+    if !config_path.exists() {
+        return Err(MultiAiError::Config(
+            "multi-ai-config.jsonc not found in current directory. Please run 'mai remove' from a directory containing this file.".to_string()
+        ));
+    }
+    
+    // Check for git-worktree-config.jsonc in current directory
+    let gwt_config_path = project_path.join("git-worktree-config.jsonc");
+    if !gwt_config_path.exists() {
+        return Err(MultiAiError::Config(
+            "git-worktree-config.jsonc not found in current directory. Please ensure this file exists.".to_string()
+        ));
     }
 
     let project_name = project_path
@@ -271,34 +284,20 @@ fn remove_command(project_path: String, branch_prefix: String, use_tmux: bool) -
 }
 
 fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
-    // Try .json first, then .jsonc
-    let json_path = project_path.join("multi-ai-config.json");
-    let jsonc_path = project_path.join("multi-ai-config.jsonc");
+    // Only look for .jsonc
+    let config_path = project_path.join("multi-ai-config.jsonc");
     
-    let config_path = if json_path.exists() {
-        json_path
-    } else if jsonc_path.exists() {
-        jsonc_path
-    } else {
-        return Err(MultiAiError::Config(format!(
-            "Project configuration not found. Please create multi-ai-config.json or multi-ai-config.jsonc in the project root: {}",
-            project_path.display()
-        )));
-    };
+    if !config_path.exists() {
+        return Err(MultiAiError::Config(
+            "multi-ai-config.jsonc not found in current directory. Please create this file first.".to_string()
+        ));
+    }
 
     let content = fs::read_to_string(&config_path)
         .map_err(|e| MultiAiError::Config(format!("Failed to read project config: {}", e)))?;
     
     ProjectConfig::from_json(&content)
         .map_err(|e| MultiAiError::Config(format!("Failed to parse project config: {}", e)))
-}
-
-fn expand_path(path: &str) -> PathBuf {
-    if path == "." {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    } else {
-        PathBuf::from(shellexpand::tilde(path).to_string())
-    }
 }
 
 fn ask_confirmation(question: &str) -> Result<bool> {

@@ -10,6 +10,7 @@ The following AI development tools are supported:
 - **codex**: GitHub Copilot's AI assistant (with `--ask-for-approval never` flag for YOLO mode)
 - **amp**: AI assistant (with `--dangerously-allow-all` flag for YOLO mode)
 - **opencode**: AI coding assistant (no special flags for YOLO mode)
+- **cursor-agent**: Cursor AI assistant (with `--force` flag for YOLO mode)
 
 ## Features
 
@@ -40,7 +41,20 @@ cargo build --release
 
 ## Configuration
 
-Create a `mai-config.jsonc` file in your project root with your AI applications and their commands:
+### Required Files
+
+As of v0.9.0, the following files must exist in your project directory:
+1. `multi-ai-config.jsonc` - Defines AI applications and their commands
+2. `git-worktree-config.jsonc` - Git worktree configuration (created by `gwt init`)
+
+### Setting up multi-ai-config.jsonc
+
+You can create the config file interactively:
+```bash
+mai init
+```
+
+Or create it manually:
 
 ```jsonc
 {
@@ -64,6 +78,10 @@ Create a `mai-config.jsonc` file in your project root with your AI applications 
     {
       "name": "opencode",
       "command": "opencode"
+    },
+    {
+      "name": "cursor-agent",
+      "command": "cursor-agent --force"
     }
   ]
 }
@@ -76,19 +94,22 @@ Create a `mai-config.jsonc` file in your project root with your AI applications 
 
 ## Usage
 
+**Important**: As of v0.9.0, `mai add` and `mai remove` commands must be run from a directory containing both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` files.
+
 ### Create worktrees and terminal sessions
 
 **Default (iTerm2):**
 ```bash
-mai create ~/code/my-project feature-branch
-
-# Or using the shorthand:
-mai ~/code/my-project feature-branch
+# From your project directory:
+cd ~/code/my-project
+mai add feature-branch
 ```
 
 **With tmux:**
 ```bash
-mai create ~/code/my-project feature-branch --tmux
+# From your project directory:
+cd ~/code/my-project
+mai add feature-branch --tmux
 ```
 
 This will:
@@ -101,10 +122,12 @@ This will:
 ### Remove worktrees and cleanup
 
 ```bash
-mai remove ~/code/my-project feature-branch
+# From your project directory:
+cd ~/code/my-project
+mai remove feature-branch
 
 # With tmux:
-mai remove ~/code/my-project feature-branch --tmux
+mai remove feature-branch --tmux
 ```
 
 ## Terminal Layout
@@ -134,7 +157,9 @@ gwt init
 
 2. Create the configuration file:
 ```bash
-cat > mai-config.jsonc << 'EOF'
+mai init  # Interactive setup
+# OR manually create multi-ai-config.jsonc:
+cat > multi-ai-config.jsonc << 'EOF'
 {
   "ai_apps": [
     {
@@ -152,14 +177,16 @@ EOF
 
 3. Create AI development environments:
 ```bash
-mai create ~/code/my-project new-feature
+cd ~/code/my-project
+mai add new-feature
 ```
 
 4. Work on your feature across multiple AI tools
 
 5. Clean up when done:
 ```bash
-mai remove ~/code/my-project new-feature
+cd ~/code/my-project
+mai remove new-feature
 ```
 
 ## Tmux Navigation

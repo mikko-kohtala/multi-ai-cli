@@ -23,9 +23,6 @@ pub enum MultiAiError {
     #[error("iTerm2 error: {0}")]
     ITerm2(String),
     
-    #[error("Project not found: {0}")]
-    ProjectNotFound(String),
-    
     #[error("Command execution failed: {0}")]
     CommandFailed(String),
 }

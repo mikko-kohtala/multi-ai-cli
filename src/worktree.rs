@@ -128,7 +128,13 @@ impl WorktreeManager {
     }
 
     pub fn is_gwt_project(&self) -> bool {
-        // Check if git-worktree-config.yaml exists (gwt configuration file)
+        // Check if git-worktree-config.jsonc exists (gwt configuration file)
+        let gwt_config_jsonc = self.project_path.join("git-worktree-config.jsonc");
+        if gwt_config_jsonc.exists() {
+            return true;
+        }
+        
+        // Also check for .yaml for backward compatibility
         let gwt_config_yaml = self.project_path.join("git-worktree-config.yaml");
         if gwt_config_yaml.exists() {
             return true;

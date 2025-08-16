@@ -44,6 +44,11 @@ impl AiService {
             normal_command: "opencode",
             yolo_command: "opencode",
         },
+        AiService {
+            name: "cursor-agent",
+            normal_command: "cursor-agent",
+            yolo_command: "cursor-agent --force",
+        },
     ];
 }
 

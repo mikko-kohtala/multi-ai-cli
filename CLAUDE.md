@@ -14,6 +14,13 @@ The following AI development tools are supported:
 - **codex**: GitHub Copilot's AI assistant (with `--ask-for-approval never` flag for YOLO mode)
 - **amp**: AI assistant (with `--dangerously-allow-all` flag for YOLO mode)
 - **opencode**: AI coding assistant (no special flags for YOLO mode)
+- **cursor-agent**: Cursor AI assistant (with `--force` flag for YOLO mode)
+
+**IMPORTANT**: When adding new AI tools, always update:
+1. `src/init.rs` - Add to AiService::SERVICES array
+2. `CLAUDE.md` - Add to this supported tools list
+3. `README.md` - Update the AI tools list
+4. `Cargo.toml` - Increment the version number
 
 ## Version Management
 
@@ -31,13 +38,23 @@ cargo build --release # Release build for production use
 ```
 
 ### Run
+**IMPORTANT**: As of v0.9.0, `mai add` and `mai remove` must be run from a directory containing both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` files.
+
 ```bash
-cargo run -- <project-path> <branch-prefix>                    # Run from source
-cargo run -- create <project-path> <branch-prefix>             # Create worktrees and session
-cargo run -- create <project-path> <branch-prefix> --tmux      # Use tmux instead of iTerm2
-cargo run -- remove <project-path> <branch-prefix>             # Remove worktrees and session
-./target/debug/mai <project-path> <branch-prefix>              # Run debug binary
-./target/release/mai <project-path> <branch-prefix>            # Run release binary
+# From a directory with the required config files:
+cargo run -- add <branch-prefix>             # Create worktrees and session
+cargo run -- add <branch-prefix> --tmux      # Use tmux instead of iTerm2
+cargo run -- remove <branch-prefix>          # Remove worktrees and session
+cargo run -- remove <branch-prefix> --tmux   # Remove tmux session
+
+# Or using the binary:
+mai add <branch-prefix>                      # Create worktrees and session
+mai add <branch-prefix> --tmux               # Use tmux instead of iTerm2
+mai remove <branch-prefix>                   # Remove worktrees and session
+mai remove <branch-prefix> --tmux            # Remove tmux session
+
+# Initialize a new config file:
+mai init                                      # Interactive setup of multi-ai-config.jsonc
 ```
 
 ### Test
@@ -57,14 +74,17 @@ cargo fmt      # Format code according to Rust standards
 ## Architecture
 
 ### Core Flow
-1. **main.rs**: Entry point, handles CLI argument parsing via clap, orchestrates the create/remove commands
+1. **main.rs**: Entry point, handles CLI argument parsing via clap, orchestrates the add/remove commands
+   - As of v0.9.0: Commands work from current directory, no project path argument needed
+   - Validates presence of both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` in current directory
 2. **config.rs**: Manages project configuration:
-   - `ProjectConfig`: Reads from project's `multi-ai-config.json[c]` for AI apps list
+   - `ProjectConfig`: Reads from current directory's `multi-ai-config.jsonc` for AI apps list
    - `AiApp` struct: Defines AI tool name and full command to execute
 
 3. **worktree.rs**: `WorktreeManager` interfaces with gwt CLI to:
    - Create git worktrees for each AI app with naming pattern: `<branch-prefix>-<ai-app>`
    - Validate gwt CLI availability and project initialization
+   - Check for `git-worktree-config.jsonc` (or `.yaml` for backward compatibility)
    - Remove worktrees during cleanup
 
 4. **iterm2.rs**: `ITerm2Manager` handles iTerm2 automation (default):
@@ -85,10 +105,11 @@ cargo fmt      # Format code according to Rust standards
 
 ### Key Implementation Details
 
-- **Tmux Pane Targeting**: After splitting, panes are indexed 1 (left) and 2 (right). The code sends commands to `.1` for the left pane.
+- **Current Directory Usage** (v0.9.0+): Commands must be run from directory containing config files
+- **Required Files**: Both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` must exist in current directory
+- **Tmux Pane Targeting**: After splitting, panes are indexed 1 (left) and 2 (right). The code sends commands to `.1` for the left pane
 - **Shell Initialization**: A 500ms delay ensures the shell is ready before sending commands
-- **Path Expansion**: Project paths support `~` expansion via shellexpand crate
-- **JSONC Support**: Both JSON and JSONC (with comments) formats are supported for configurations
+- **JSONC Support**: Configuration files use JSONC format (JSON with comments)
 
 ### Dependencies
 - External tools: gwt CLI, tmux
