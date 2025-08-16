@@ -193,9 +193,14 @@ fn create_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
         let iterm2_manager = ITerm2Manager::new(&project_name, &branch_prefix);
         
         println!("\nCreating iTerm2 tabs for AI applications...");
-        iterm2_manager.create_tabs_per_app(&project_config.ai_apps, &worktree_paths)?;
-        
-        println!("✓ iTerm2 tabs created successfully!");
+        println!("  Apps to create tabs for: {:?}", worktree_paths.iter().map(|(app, _)| app.as_str()).collect::<Vec<_>>());
+        match iterm2_manager.create_tabs_per_app(&project_config.ai_apps, &worktree_paths) {
+            Ok(_) => println!("✓ iTerm2 tabs created successfully!"),
+            Err(e) => {
+                eprintln!("✗ Failed to create iTerm2 tabs: {}", e);
+                return Err(e);
+            }
+        }
     }
 
     Ok(())

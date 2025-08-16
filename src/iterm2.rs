@@ -252,6 +252,9 @@ tell application "iTerm"
     end tell
 end tell"#);
 
+        // Debug: Log the AppleScript being executed
+        eprintln!("DEBUG: Executing AppleScript for {} apps", worktree_paths.len());
+        
         // Execute the AppleScript
         let output = Command::new("osascript")
             .arg("-e")
@@ -261,6 +264,8 @@ end tell"#);
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
+            eprintln!("DEBUG: AppleScript stderr: {}", error);
+            eprintln!("DEBUG: AppleScript stdout: {}", String::from_utf8_lossy(&output.stdout));
             return Err(MultiAiError::ITerm2(format!("AppleScript failed: {}", error)));
         }
 
