@@ -32,12 +32,13 @@ tell application "iTerm"
         
         tell current session"#);
 
-        match worktree_paths.len() {
-            1 => {
-                // Single app: 1x2 (one column with 2 rows)
-                let (app, path) = &worktree_paths[0];
-                applescript.push_str(&format!(
-                    r#"
+        let num_apps = worktree_paths.len();
+        
+        // Handle single app case
+        if num_apps == 1 {
+            let (app, path) = &worktree_paths[0];
+            applescript.push_str(&format!(
+                r#"
             -- Single app: {} (1x2 layout)
             -- Wait for shell to initialize
             delay 2
@@ -49,192 +50,76 @@ tell application "iTerm"
                 delay 1
                 write text "cd {}"
             end tell"#,
-                    app.as_str(), path, app.command(), path
+                app.as_str(), path, app.command(), path
+            ));
+        } else {
+            // Multiple apps: create dynamic column layout
+            applescript.push_str(&format!(
+                r#"
+            -- {} apps: {}x2 layout
+            -- Create {} columns"#,
+                num_apps, num_apps, num_apps
+            ));
+            
+            // Create vertical splits for columns (skip first column as it's the current session)
+            for i in 2..=num_apps {
+                if i == 2 {
+                    applescript.push_str("\n            set col2 to (split vertically with default profile)");
+                } else {
+                    applescript.push_str(&format!(
+                        "\n            tell col{}\n                set col{} to (split vertically with default profile)\n            end tell",
+                        i - 1, i
+                    ));
+                }
+            }
+            
+            // Split each column horizontally
+            applescript.push_str("\n            \n            -- Split each column horizontally");
+            applescript.push_str("\n            set col1Bottom to (split horizontally with default profile)");
+            for i in 2..=num_apps {
+                applescript.push_str(&format!(
+                    "\n            tell col{}\n                set col{}Bottom to (split horizontally with default profile)\n            end tell",
+                    i, i
                 ));
             }
-            2 => {
-                // Two apps: 2x2 (two columns, each with 2 rows)
-                let (app1, path1) = &worktree_paths[0];
-                let (app2, path2) = &worktree_paths[1];
+            
+            // Populate panes
+            applescript.push_str("\n            \n            -- Populate panes");
+            for (i, (app, path)) in worktree_paths.iter().enumerate() {
+                let col_num = i + 1;
                 
-                applescript.push_str(&format!(
-                    r#"
-            -- Two apps: 2x2 layout
-            -- Create the basic 2x2 grid first
-            
-            -- Split vertically to create two columns
-            set rightColumn to (split vertically with default profile)
-            
-            -- Split each column horizontally
-            set leftBottom to (split horizontally with default profile)
-            tell rightColumn
-                set rightBottom to (split horizontally with default profile)
-            end tell
-            
-            -- Now populate each pane
-            -- First app: {} (left column, top)
-            delay 2
-            write text "cd {} && {}"
-            
-            -- First app shell (left column, bottom)
-            tell leftBottom
-                delay 1
-                write text "cd {}"
-            end tell
-            
-            -- Second app: {} (right column, top)
-            tell rightColumn
-                delay 1
-                write text "cd {} && {}"
-            end tell
-            
-            -- Second app shell (right column, bottom)
-            tell rightBottom
-                delay 1
-                write text "cd {}"
-            end tell"#,
-                    app1.as_str(), path1, app1.command(), path1,
-                    app2.as_str(), path2, app2.command(), path2
-                ));
-            }
-            3 => {
-                // Three apps: 3x2 (three columns, each with 2 rows)
-                let (app1, path1) = &worktree_paths[0];
-                let (app2, path2) = &worktree_paths[1];
-                let (app3, path3) = &worktree_paths[2];
-                
-                applescript.push_str(&format!(
-                    r#"
-            -- Three apps: 3x2 layout
-            -- Create 3 columns first
-            set col2 to (split vertically with default profile)
-            tell col2
-                set col3 to (split vertically with default profile)
-            end tell
-            
-            -- Split each column horizontally
-            set col1Bottom to (split horizontally with default profile)
-            tell col2
-                set col2Bottom to (split horizontally with default profile)
-            end tell
-            tell col3
-                set col3Bottom to (split horizontally with default profile)
-            end tell
-            
-            -- Populate panes
-            -- First app: {} (column 1, top)
+                if i == 0 {
+                    // First column uses current session
+                    applescript.push_str(&format!(
+                        r#"
+            -- App {}: {} (column {}, top)
             delay 2
             write text "cd {} && {}"
             
             tell col1Bottom
                 delay 1
                 write text "cd {}"
-            end tell
+            end tell"#,
+                        i + 1, app.as_str(), col_num, path, app.command(), path
+                    ));
+                } else {
+                    // Other columns use colN references
+                    applescript.push_str(&format!(
+                        r#"
             
-            -- Second app: {} (column 2, top)
-            tell col2
+            -- App {}: {} (column {}, top)
+            tell col{}
                 delay 1
                 write text "cd {} && {}"
             end tell
             
-            tell col2Bottom
-                delay 1
-                write text "cd {}"
-            end tell
-            
-            -- Third app: {} (column 3, top)
-            tell col3
-                delay 1
-                write text "cd {} && {}"
-            end tell
-            
-            tell col3Bottom
+            tell col{}Bottom
                 delay 1
                 write text "cd {}"
             end tell"#,
-                    app1.as_str(), path1, app1.command(), path1,
-                    app2.as_str(), path2, app2.command(), path2,
-                    app3.as_str(), path3, app3.command(), path3
-                ));
-            }
-            _ => {
-                // Four or more apps: 4x2 (four columns, each with 2 rows)
-                let (app1, path1) = &worktree_paths[0];
-                let (app2, path2) = &worktree_paths[1];
-                let (app3, path3) = &worktree_paths[2];
-                let (app4, path4) = &worktree_paths[3];
-                
-                applescript.push_str(&format!(
-                    r#"
-            -- Four apps: 4x2 layout
-            -- First create 4 columns
-            set col2 to (split vertically with default profile)
-            tell col2
-                set col3 to (split vertically with default profile)
-                tell col3
-                    set col4 to (split vertically with default profile)
-                end tell
-            end tell
-            
-            -- Now split each column horizontally to create 8 panes total
-            set col1Bottom to (split horizontally with default profile)
-            tell col2
-                set col2Bottom to (split horizontally with default profile)
-            end tell
-            tell col3
-                set col3Bottom to (split horizontally with default profile)
-            end tell
-            tell col4
-                set col4Bottom to (split horizontally with default profile)
-            end tell
-            
-            -- Wait for shells to initialize and populate each pane
-            -- First app: {} (column 1)
-            delay 2
-            write text "cd {} && {}"
-            
-            tell col1Bottom
-                delay 1
-                write text "cd {}"
-            end tell
-            
-            -- Second app: {} (column 2)
-            tell col2
-                delay 1
-                write text "cd {} && {}"
-            end tell
-            
-            tell col2Bottom
-                delay 1
-                write text "cd {}"
-            end tell
-            
-            -- Third app: {} (column 3)
-            tell col3
-                delay 1
-                write text "cd {} && {}"
-            end tell
-            
-            tell col3Bottom
-                delay 1
-                write text "cd {}"
-            end tell
-            
-            -- Fourth app: {} (column 4)
-            tell col4
-                delay 1
-                write text "cd {} && {}"
-            end tell
-            
-            tell col4Bottom
-                delay 1
-                write text "cd {}"
-            end tell"#,
-                    app1.as_str(), path1, app1.command(), path1,
-                    app2.as_str(), path2, app2.command(), path2,
-                    app3.as_str(), path3, app3.command(), path3,
-                    app4.as_str(), path4, app4.command(), path4
-                ));
+                        i + 1, app.as_str(), col_num, col_num, path, app.command(), col_num, path
+                    ));
+                }
             }
         }
 
