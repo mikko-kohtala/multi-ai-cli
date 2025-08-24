@@ -58,6 +58,7 @@ Or create it manually:
 
 ```jsonc
 {
+  "terminals_per_column": 2,  // Number of terminal panes per column (first is AI command, rest are shells)
   "ai_apps": [
     {
       "name": "claude",
@@ -89,8 +90,10 @@ Or create it manually:
 
 ### Configuration Fields
 
-- `name`: The name of the AI tool (used for branch naming)
-- `command`: The full command to launch the AI tool with any flags
+- `terminals_per_column` (optional): Number of terminal panes per column (default: 2). The first pane runs the AI command, additional panes are shell terminals
+- `ai_apps`: Array of AI applications to configure
+  - `name`: The name of the AI tool (used for branch naming)
+  - `command`: The full command to launch the AI tool with any flags
 
 ## Usage
 

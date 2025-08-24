@@ -1,5 +1,6 @@
 {
 	// Example configuration for multi-ai CLI
+	"terminals_per_column": 2,  // Number of terminal panes per column (first is AI command, rest are shells)
 	"ai_apps": [
 		{
 			"name": "claude",

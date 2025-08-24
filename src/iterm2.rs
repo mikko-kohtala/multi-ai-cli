@@ -6,18 +6,20 @@ pub struct ITerm2Manager {
     #[allow(dead_code)]
     project: String,
     branch_prefix: String,
+    terminals_per_column: usize,
 }
 
 impl ITerm2Manager {
-    pub fn new(project: &str, branch_prefix: &str) -> Self {
+    pub fn new(project: &str, branch_prefix: &str, terminals_per_column: usize) -> Self {
         Self {
             project: project.to_string(),
             branch_prefix: branch_prefix.to_string(),
+            terminals_per_column,
         }
     }
 
     /// Create a single tab with all AI apps in columns
-    /// Each app gets a vertical column with 3 panes (top for AI command, middle and bottom for shells)
+    /// Each app gets a vertical column with configurable number of panes (first for AI command, rest for shells)
     pub fn create_tabs_per_app(&self, _ai_apps: &[AiApp], worktree_paths: &[(AiApp, String)]) -> Result<()> {
         if worktree_paths.is_empty() {
             return Ok(());
@@ -39,33 +41,63 @@ tell application "iTerm"
             let (app, path) = &worktree_paths[0];
             applescript.push_str(&format!(
                 r#"
-            -- Single app: {} (1x3 layout)
+            -- Single app: {} (1x{} layout)
             -- Wait for shell to initialize
             delay 2
-            write text "cd {} && {}"
-            
-            -- Split horizontally for middle shell
-            set middlePane to (split horizontally with default profile)
-            tell middlePane
-                delay 1
-                write text "cd {}"
-                
-                -- Split again for bottom shell
-                set bottomPane to (split horizontally with default profile)
-                tell bottomPane
-                    delay 1
-                    write text "cd {}"
-                end tell
-            end tell"#,
-                app.as_str(), path, app.command(), path, path
+            write text "cd {} && {}""#,
+                app.as_str(), self.terminals_per_column, path, app.command()
             ));
+            
+            // Create additional panes for shells
+            if self.terminals_per_column > 1 {
+                // Create the first split
+                applescript.push_str("\n            \n            -- Split horizontally for additional shells");
+                
+                // We need to keep track of pane references for nested splits
+                let mut pane_refs = Vec::new();
+                for i in 2..=self.terminals_per_column {
+                    if i == 2 {
+                        applescript.push_str(&format!(
+                            r#"
+            set pane{} to (split horizontally with default profile)
+            tell pane{}
+                delay 1
+                write text "cd {}""#,
+                            i, i, path
+                        ));
+                        pane_refs.push(format!("pane{}", i));
+                    } else {
+                        // Nested splits within the last pane
+                        applescript.push_str(&format!(
+                            r#"
+                
+                set pane{} to (split horizontally with default profile)
+                tell pane{}
+                    delay 1
+                    write text "cd {}""#,
+                            i, i, path
+                        ));
+                        pane_refs.push(format!("pane{}", i));
+                    }
+                }
+                
+                // Close all the nested tells
+                for j in 2..=self.terminals_per_column {
+                    if j > 2 {
+                        applescript.push_str("\n                end tell");
+                    }
+                }
+                if self.terminals_per_column > 1 {
+                    applescript.push_str("\n            end tell");
+                }
+            }
         } else {
             // Multiple apps: create dynamic column layout
             applescript.push_str(&format!(
                 r#"
-            -- {} apps: {}x3 layout
+            -- {} apps: {}x{} layout
             -- Create {} columns"#,
-                num_apps, num_apps, num_apps
+                num_apps, num_apps, self.terminals_per_column, num_apps
             ));
             
             // Create vertical splits for columns (skip first column as it's the current session)
@@ -80,16 +112,29 @@ tell application "iTerm"
                 }
             }
             
-            // Split each column horizontally twice to get 3 panes
-            applescript.push_str("\n            \n            -- Split each column horizontally twice for 3 panes");
-            applescript.push_str("\n            set col1Middle to (split horizontally with default profile)");
-            applescript.push_str("\n            tell col1Middle\n                set col1Bottom to (split horizontally with default profile)\n            end tell");
-            
-            for i in 2..=num_apps {
-                applescript.push_str(&format!(
-                    "\n            tell col{}\n                set col{}Middle to (split horizontally with default profile)\n                tell col{}Middle\n                    set col{}Bottom to (split horizontally with default profile)\n                end tell\n            end tell",
-                    i, i, i, i
-                ));
+            // Split each column horizontally to get the configured number of panes
+            if self.terminals_per_column > 1 {
+                applescript.push_str(&format!("\n            \n            -- Split each column horizontally for {} panes", self.terminals_per_column));
+                
+                // For column 1 (current session)
+                for pane_idx in 2..=self.terminals_per_column {
+                    if pane_idx == 2 {
+                        applescript.push_str(&format!("\n            set col1Pane{} to (split horizontally with default profile)", pane_idx));
+                    } else {
+                        applescript.push_str(&format!("\n            tell col1Pane{}\n                set col1Pane{} to (split horizontally with default profile)\n            end tell", pane_idx - 1, pane_idx));
+                    }
+                }
+                
+                // For other columns
+                for i in 2..=num_apps {
+                    for pane_idx in 2..=self.terminals_per_column {
+                        if pane_idx == 2 {
+                            applescript.push_str(&format!("\n            tell col{}\n                set col{}Pane{} to (split horizontally with default profile)\n            end tell", i, i, pane_idx));
+                        } else {
+                            applescript.push_str(&format!("\n            tell col{}Pane{}\n                set col{}Pane{} to (split horizontally with default profile)\n            end tell", i, pane_idx - 1, i, pane_idx));
+                        }
+                    }
+                }
             }
             
             // Populate panes
@@ -104,21 +149,23 @@ tell application "iTerm"
             -- App {}: {} (column {})
             -- Top pane: AI command
             delay 2
-            write text "cd {} && {}"
+            write text "cd {} && {}""#,
+                        i + 1, app.as_str(), col_num, path, app.command()
+                    ));
+                    
+                    // Additional panes for shells
+                    for pane_idx in 2..=self.terminals_per_column {
+                        applescript.push_str(&format!(
+                            r#"
             
-            -- Middle pane: shell
-            tell col1Middle
-                delay 1
-                write text "cd {}"
-            end tell
-            
-            -- Bottom pane: shell
-            tell col1Bottom
+            -- Pane {}: shell
+            tell col1Pane{}
                 delay 1
                 write text "cd {}"
             end tell"#,
-                        i + 1, app.as_str(), col_num, path, app.command(), path, path
-                    ));
+                            pane_idx, pane_idx, path
+                        ));
+                    }
                 } else {
                     // Other columns use colN references
                     applescript.push_str(&format!(
@@ -129,21 +176,23 @@ tell application "iTerm"
             tell col{}
                 delay 1
                 write text "cd {} && {}"
-            end tell
+            end tell"#,
+                        i + 1, app.as_str(), col_num, col_num, path, app.command()
+                    ));
+                    
+                    // Additional panes for shells
+                    for pane_idx in 2..=self.terminals_per_column {
+                        applescript.push_str(&format!(
+                            r#"
             
-            -- Middle pane: shell
-            tell col{}Middle
-                delay 1
-                write text "cd {}"
-            end tell
-            
-            -- Bottom pane: shell
-            tell col{}Bottom
+            -- Pane {}: shell
+            tell col{}Pane{}
                 delay 1
                 write text "cd {}"
             end tell"#,
-                        i + 1, app.as_str(), col_num, col_num, path, app.command(), col_num, path, col_num, path
-                    ));
+                            pane_idx, col_num, pane_idx, path
+                        ));
+                    }
                 }
             }
         }

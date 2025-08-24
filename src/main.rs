@@ -190,10 +190,11 @@ fn create_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
         println!("\nAttaching to session...");
         tmux_manager.attach_session()?;
     } else {
-        let iterm2_manager = ITerm2Manager::new(&project_name, &branch_prefix);
+        let iterm2_manager = ITerm2Manager::new(&project_name, &branch_prefix, project_config.terminals_per_column);
         
         println!("\nCreating iTerm2 tabs for AI applications...");
         println!("  Apps to create tabs for: {:?}", worktree_paths.iter().map(|(app, _)| app.as_str()).collect::<Vec<_>>());
+        println!("  Terminals per column: {}", project_config.terminals_per_column);
         match iterm2_manager.create_tabs_per_app(&project_config.ai_apps, &worktree_paths) {
             Ok(_) => println!("✓ iTerm2 tabs created successfully!"),
             Err(e) => {

@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProjectConfig {
     pub ai_apps: Vec<AiApp>,
+    #[serde(default = "default_terminals_per_column")]
+    pub terminals_per_column: usize,
+}
+
+fn default_terminals_per_column() -> usize {
+    2
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
