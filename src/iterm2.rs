@@ -17,7 +17,7 @@ impl ITerm2Manager {
     }
 
     /// Create a single tab with all AI apps in columns
-    /// Each app gets a vertical column with 2 panes (top for AI command, bottom for shell)
+    /// Each app gets a vertical column with 3 panes (top for AI command, middle and bottom for shells)
     pub fn create_tabs_per_app(&self, _ai_apps: &[AiApp], worktree_paths: &[(AiApp, String)]) -> Result<()> {
         if worktree_paths.is_empty() {
             return Ok(());
@@ -39,24 +39,31 @@ tell application "iTerm"
             let (app, path) = &worktree_paths[0];
             applescript.push_str(&format!(
                 r#"
-            -- Single app: {} (1x2 layout)
+            -- Single app: {} (1x3 layout)
             -- Wait for shell to initialize
             delay 2
             write text "cd {} && {}"
             
-            -- Split horizontally for shell
-            set shellPane to (split horizontally with default profile)
-            tell shellPane
+            -- Split horizontally for middle shell
+            set middlePane to (split horizontally with default profile)
+            tell middlePane
                 delay 1
                 write text "cd {}"
+                
+                -- Split again for bottom shell
+                set bottomPane to (split horizontally with default profile)
+                tell bottomPane
+                    delay 1
+                    write text "cd {}"
+                end tell
             end tell"#,
-                app.as_str(), path, app.command(), path
+                app.as_str(), path, app.command(), path, path
             ));
         } else {
             // Multiple apps: create dynamic column layout
             applescript.push_str(&format!(
                 r#"
-            -- {} apps: {}x2 layout
+            -- {} apps: {}x3 layout
             -- Create {} columns"#,
                 num_apps, num_apps, num_apps
             ));
@@ -73,13 +80,15 @@ tell application "iTerm"
                 }
             }
             
-            // Split each column horizontally
-            applescript.push_str("\n            \n            -- Split each column horizontally");
-            applescript.push_str("\n            set col1Bottom to (split horizontally with default profile)");
+            // Split each column horizontally twice to get 3 panes
+            applescript.push_str("\n            \n            -- Split each column horizontally twice for 3 panes");
+            applescript.push_str("\n            set col1Middle to (split horizontally with default profile)");
+            applescript.push_str("\n            tell col1Middle\n                set col1Bottom to (split horizontally with default profile)\n            end tell");
+            
             for i in 2..=num_apps {
                 applescript.push_str(&format!(
-                    "\n            tell col{}\n                set col{}Bottom to (split horizontally with default profile)\n            end tell",
-                    i, i
+                    "\n            tell col{}\n                set col{}Middle to (split horizontally with default profile)\n                tell col{}Middle\n                    set col{}Bottom to (split horizontally with default profile)\n                end tell\n            end tell",
+                    i, i, i, i
                 ));
             }
             
@@ -92,32 +101,48 @@ tell application "iTerm"
                     // First column uses current session
                     applescript.push_str(&format!(
                         r#"
-            -- App {}: {} (column {}, top)
+            -- App {}: {} (column {})
+            -- Top pane: AI command
             delay 2
             write text "cd {} && {}"
             
+            -- Middle pane: shell
+            tell col1Middle
+                delay 1
+                write text "cd {}"
+            end tell
+            
+            -- Bottom pane: shell
             tell col1Bottom
                 delay 1
                 write text "cd {}"
             end tell"#,
-                        i + 1, app.as_str(), col_num, path, app.command(), path
+                        i + 1, app.as_str(), col_num, path, app.command(), path, path
                     ));
                 } else {
                     // Other columns use colN references
                     applescript.push_str(&format!(
                         r#"
             
-            -- App {}: {} (column {}, top)
+            -- App {}: {} (column {})
+            -- Top pane: AI command
             tell col{}
                 delay 1
                 write text "cd {} && {}"
             end tell
             
+            -- Middle pane: shell
+            tell col{}Middle
+                delay 1
+                write text "cd {}"
+            end tell
+            
+            -- Bottom pane: shell
             tell col{}Bottom
                 delay 1
                 write text "cd {}"
             end tell"#,
-                        i + 1, app.as_str(), col_num, col_num, path, app.command(), col_num, path
+                        i + 1, app.as_str(), col_num, col_num, path, app.command(), col_num, path, col_num, path
                     ));
                 }
             }
