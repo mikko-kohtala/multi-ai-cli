@@ -14,7 +14,12 @@ impl TmuxManager {
         Self { session_name }
     }
 
-    pub fn create_session(&self, _ai_apps: &[AiApp], worktree_paths: &[(AiApp, String)], layout: TmuxLayout) -> Result<()> {
+    pub fn create_session(
+        &self,
+        _ai_apps: &[AiApp],
+        worktree_paths: &[(AiApp, String)],
+        layout: TmuxLayout,
+    ) -> Result<()> {
         if !self.is_tmux_installed() {
             return Err(MultiAiError::Tmux("tmux is not installed".to_string()));
         }
@@ -27,7 +32,9 @@ impl TmuxManager {
         }
 
         if worktree_paths.is_empty() {
-            return Err(MultiAiError::Tmux("No worktrees to create session for".to_string()));
+            return Err(MultiAiError::Tmux(
+                "No worktrees to create session for".to_string(),
+            ));
         }
 
         match layout {
@@ -54,14 +61,18 @@ impl TmuxManager {
         let output = Command::new("tmux")
             .args([
                 "select-window",
-                "-t", &format!("{}:{}", self.session_name, window),
+                "-t",
+                &format!("{}:{}", self.session_name, window),
             ])
             .output()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to select window: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to select window: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to select window: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -72,16 +83,24 @@ impl TmuxManager {
             .args([
                 "new-session",
                 "-d",
-                "-s", &self.session_name,
-                "-n", ai_app.as_str(),
-                "-c", worktree_path,
+                "-s",
+                &self.session_name,
+                "-n",
+                ai_app.as_str(),
+                "-c",
+                worktree_path,
             ])
             .output()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to create tmux session: {}", e)))?;
+            .map_err(|e| {
+                MultiAiError::CommandFailed(format!("Failed to create tmux session: {}", e))
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to create session: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to create session: {}",
+                stderr
+            )));
         }
 
         self.split_window_for_ai(ai_app, worktree_path)?;
@@ -93,16 +112,22 @@ impl TmuxManager {
         let output = Command::new("tmux")
             .args([
                 "new-window",
-                "-t", &format!("{}:", self.session_name),
-                "-n", ai_app.as_str(),
-                "-c", worktree_path,
+                "-t",
+                &format!("{}:", self.session_name),
+                "-n",
+                ai_app.as_str(),
+                "-c",
+                worktree_path,
             ])
             .output()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to create window: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to create window: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to create window: {}",
+                stderr
+            )));
         }
 
         self.split_window_for_ai(ai_app, worktree_path)?;
@@ -119,16 +144,22 @@ impl TmuxManager {
             .args([
                 "split-window",
                 "-h",
-                "-t", &format!("{}:{}", self.session_name, ai_app.as_str()),
-                "-c", worktree_path,
-                "-p", "50",
+                "-t",
+                &format!("{}:{}", self.session_name, ai_app.as_str()),
+                "-c",
+                worktree_path,
+                "-p",
+                "50",
             ])
             .output()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to split window: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to split window: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to split window: {}",
+                stderr
+            )));
         }
 
         // Wait for shell to initialize
@@ -137,18 +168,16 @@ impl TmuxManager {
         // Launch the AI app in the left/original pane by id
         let launch_command = format!("cd {} && {}", worktree_path, ai_app.command());
         let output = Command::new("tmux")
-            .args([
-                "send-keys",
-                "-t", &left_pane_id,
-                &launch_command,
-                "Enter",
-            ])
+            .args(["send-keys", "-t", &left_pane_id, &launch_command, "Enter"])
             .output()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to launch AI app: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to launch AI app: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to launch AI app: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -158,14 +187,18 @@ impl TmuxManager {
         let output = Command::new("tmux")
             .args([
                 "select-window",
-                "-t", &format!("{}:{}", self.session_name, ai_app.as_str()),
+                "-t",
+                &format!("{}:{}", self.session_name, ai_app.as_str()),
             ])
             .output()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to select window: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to select window: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to select window: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -175,12 +208,18 @@ impl TmuxManager {
         let output = Command::new("tmux")
             .args(["attach-session", "-t", &self.session_name])
             .spawn()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to attach to session: {}", e)))?
+            .map_err(|e| {
+                MultiAiError::CommandFailed(format!("Failed to attach to session: {}", e))
+            })?
             .wait()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to wait for session: {}", e)))?;
+            .map_err(|e| {
+                MultiAiError::CommandFailed(format!("Failed to wait for session: {}", e))
+            })?;
 
         if !output.success() {
-            return Err(MultiAiError::Tmux("Failed to attach to session".to_string()));
+            return Err(MultiAiError::Tmux(
+                "Failed to attach to session".to_string(),
+            ));
         }
 
         Ok(())
@@ -208,11 +247,16 @@ impl TmuxManager {
         let output = Command::new("tmux")
             .args(["kill-session", "-t", &self.session_name])
             .output()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to kill tmux session: {}", e)))?;
+            .map_err(|e| {
+                MultiAiError::CommandFailed(format!("Failed to kill tmux session: {}", e))
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to kill session: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to kill session: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -240,7 +284,10 @@ impl TmuxManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to get pane id: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to get pane id: {}",
+                stderr
+            )));
         }
 
         let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -261,7 +308,10 @@ impl TmuxManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to get pane id: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to get pane id: {}",
+                stderr
+            )));
         }
 
         let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -276,15 +326,23 @@ impl TmuxManager {
             .args([
                 "new-session",
                 "-d",
-                "-s", &self.session_name,
-                "-n", window_name,
-                "-c", &first.1,
+                "-s",
+                &self.session_name,
+                "-n",
+                window_name,
+                "-c",
+                &first.1,
             ])
             .output()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to create tmux session: {}", e)))?;
+            .map_err(|e| {
+                MultiAiError::CommandFailed(format!("Failed to create tmux session: {}", e))
+            })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to create session: {}", stderr)));
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to create session: {}",
+                stderr
+            )));
         }
 
         // Capture the initial pane id (first column)
@@ -296,17 +354,17 @@ impl TmuxManager {
         // Create additional columns (one per remaining app)
         for (_i, (_app, path)) in worktree_paths.iter().enumerate().skip(1) {
             let output = Command::new("tmux")
-                .args([
-                    "split-window",
-                    "-h",
-                    "-t", &last_col_pane,
-                    "-c", path,
-                ])
+                .args(["split-window", "-h", "-t", &last_col_pane, "-c", path])
                 .output()
-                .map_err(|e| MultiAiError::CommandFailed(format!("Failed to split column: {}", e)))?;
+                .map_err(|e| {
+                    MultiAiError::CommandFailed(format!("Failed to split column: {}", e))
+                })?;
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(MultiAiError::Tmux(format!("Failed to split column: {}", stderr)));
+                return Err(MultiAiError::Tmux(format!(
+                    "Failed to split column: {}",
+                    stderr
+                )));
             }
 
             // The new pane becomes active; capture its id
@@ -319,18 +377,15 @@ impl TmuxManager {
         for (i, (ai_app, path)) in worktree_paths.iter().enumerate() {
             let top_pane = &column_panes[i];
             let output = Command::new("tmux")
-                .args([
-                    "split-window",
-                    "-v",
-                    "-t", top_pane,
-                    "-c", path,
-                    "-p", "50",
-                ])
+                .args(["split-window", "-v", "-t", top_pane, "-c", path, "-p", "50"])
                 .output()
                 .map_err(|e| MultiAiError::CommandFailed(format!("Failed to split row: {}", e)))?;
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(MultiAiError::Tmux(format!("Failed to split row: {}", stderr)));
+                return Err(MultiAiError::Tmux(format!(
+                    "Failed to split row: {}",
+                    stderr
+                )));
             }
 
             // Allow shell to initialize
@@ -339,17 +394,17 @@ impl TmuxManager {
             // Launch AI command in the top pane
             let launch_command = format!("cd {} && {}", path, ai_app.command());
             let output = Command::new("tmux")
-                .args([
-                    "send-keys",
-                    "-t", top_pane,
-                    &launch_command,
-                    "Enter",
-                ])
+                .args(["send-keys", "-t", top_pane, &launch_command, "Enter"])
                 .output()
-                .map_err(|e| MultiAiError::CommandFailed(format!("Failed to launch AI app: {}", e)))?;
+                .map_err(|e| {
+                    MultiAiError::CommandFailed(format!("Failed to launch AI app: {}", e))
+                })?;
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(MultiAiError::Tmux(format!("Failed to launch AI app: {}", stderr)));
+                return Err(MultiAiError::Tmux(format!(
+                    "Failed to launch AI app: {}",
+                    stderr
+                )));
             }
         }
 

@@ -56,46 +56,46 @@ pub fn run_init() -> Result<()> {
     println!("Welcome to Multi-AI CLI configuration!");
     println!("This will help you create a multi-ai-config.jsonc file.");
     println!(); // Add empty line before interactive selection
-    
+
     // First, select which AI services to include
     let selected_services = select_ai_services()?;
-    
+
     if selected_services.is_empty() {
         println!("No AI services selected. Exiting without creating config file.");
         return Ok(());
     }
-    
+
     // Then for each selected service, choose normal or yolo mode
     let mut selected_apps = Vec::new();
-    
+
     for service in selected_services {
         println!("\nConfiguring {}:", service.name);
         let use_yolo = select_mode(service.name)?;
-        
+
         let command = if use_yolo {
             service.yolo_command
         } else {
             service.normal_command
         };
-        
+
         selected_apps.push(AiApp {
             name: service.name.to_string(),
             command: command.to_string(),
         });
-        
+
         println!("  ✓ {} will use: {}", service.name, command);
     }
-    
+
     // Mode selection
     println!("\nSelect terminal mode to use by default:");
     let terminal_mode = select_terminal_mode()?;
 
-    let config = ProjectConfig { 
+    let config = ProjectConfig {
         ai_apps: selected_apps,
-        terminals_per_column: 2,  // Default value
-        mode: terminal_mode.clone(),
+        terminals_per_column: 2, // Default value
+        mode: Some(terminal_mode.clone()),
     };
-    
+
     let json_content = format!(
         r#"{{
   // Multi-AI CLI configuration
@@ -106,8 +106,14 @@ pub fn run_init() -> Result<()> {
   ]
 }}"#,
         config.terminals_per_column,
-        match terminal_mode { Mode::Iterm2 => "iterm2", Mode::TmuxSingleWindow => "tmux-single-window", Mode::TmuxMultiWindow => "tmux-multi-window" },
-        config.ai_apps.iter()
+        match terminal_mode {
+            Mode::Iterm2 => "iterm2",
+            Mode::TmuxSingleWindow => "tmux-single-window",
+            Mode::TmuxMultiWindow => "tmux-multi-window",
+        },
+        config
+            .ai_apps
+            .iter()
             .map(|app| format!(
                 r#"
     {{
@@ -119,20 +125,23 @@ pub fn run_init() -> Result<()> {
             .collect::<Vec<_>>()
             .join(",")
     );
-    
+
     let config_path = "multi-ai-config.jsonc";
-    
-    if fs::metadata(config_path).is_ok() && !ask_yes_no(&format!("\n{} already exists. Overwrite?", config_path))? {
+
+    if fs::metadata(config_path).is_ok()
+        && !ask_yes_no(&format!("\n{} already exists. Overwrite?", config_path))?
+    {
         println!("Configuration not saved.");
         return Ok(());
     }
-    
+
     fs::write(config_path, json_content)?;
     println!("\n✓ Configuration saved to {}", config_path);
     println!("\nYou can now run:");
     println!("  mai add <branch-prefix>              # Uses mode from config");
-    println!("  mai add <branch-prefix> --tmux       # Override to tmux-multi-window regardless of config");
-    
+    println!("  mai add <branch-prefix> --mode tmux-single-window  # Override for a single run");
+    println!("  mai add <branch-prefix> --tmux       # Legacy alias for tmux-multi-window");
+
     Ok(())
 }
 
@@ -140,11 +149,11 @@ fn select_ai_services() -> Result<Vec<AiService>> {
     let mut stdout = io::stdout();
     let mut selected = vec![false; AiService::SERVICES.len()];
     let mut cursor_pos = 0;
-    
+
     // Save cursor position and enable raw mode
     execute!(stdout, cursor::SavePosition)?;
     terminal::enable_raw_mode()?;
-    
+
     let result = (|| -> Result<Vec<AiService>> {
         loop {
             // Restore cursor position and clear from there
@@ -153,25 +162,28 @@ fn select_ai_services() -> Result<Vec<AiService>> {
                 cursor::RestorePosition,
                 terminal::Clear(ClearType::FromCursorDown)
             )?;
-            
+
             // Use print! and write! instead of println! to avoid extra newlines in raw mode
             writeln!(stdout, "Select AI services to include:")?;
-            writeln!(stdout, "(Use ↑/↓ to navigate, Space to toggle, Enter to continue, Ctrl+C to exit)\r")?;
+            writeln!(
+                stdout,
+                "(Use ↑/↓ to navigate, Space to toggle, Enter to continue, Ctrl+C to exit)\r"
+            )?;
             writeln!(stdout, "\r")?;
-            
+
             for (i, service) in AiService::SERVICES.iter().enumerate() {
                 let checkbox = if selected[i] { "[✓]" } else { "[ ]" };
                 let line = format!(" {} {}", checkbox, service.name);
-                
+
                 if i == cursor_pos {
                     writeln!(stdout, "{}\r", line.on_dark_grey().white())?;
                 } else {
                     writeln!(stdout, "{}\r", line)?;
                 }
             }
-            
+
             stdout.flush()?;
-            
+
             // Handle input
             if let Event::Key(key) = event::read()? {
                 match key.code {
@@ -192,13 +204,21 @@ fn select_ai_services() -> Result<Vec<AiService>> {
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         // Handle Ctrl+C
                         terminal::disable_raw_mode()?;
-                        execute!(stdout, cursor::RestorePosition, terminal::Clear(ClearType::FromCursorDown))?;
+                        execute!(
+                            stdout,
+                            cursor::RestorePosition,
+                            terminal::Clear(ClearType::FromCursorDown)
+                        )?;
                         println!("\r\nCancelled.");
                         std::process::exit(0);
                     }
                     KeyCode::Esc | KeyCode::Char('q') => {
                         terminal::disable_raw_mode()?;
-                        execute!(stdout, cursor::RestorePosition, terminal::Clear(ClearType::FromCursorDown))?;
+                        execute!(
+                            stdout,
+                            cursor::RestorePosition,
+                            terminal::Clear(ClearType::FromCursorDown)
+                        )?;
                         println!("\r\nCancelled.");
                         std::process::exit(0);
                     }
@@ -206,7 +226,7 @@ fn select_ai_services() -> Result<Vec<AiService>> {
                 }
             }
         }
-        
+
         let selected_services: Vec<AiService> = AiService::SERVICES
             .iter()
             .enumerate()
@@ -218,37 +238,44 @@ fn select_ai_services() -> Result<Vec<AiService>> {
                 }
             })
             .collect();
-        
+
         Ok(selected_services)
     })();
-    
+
     // Always disable raw mode and restore cursor
     terminal::disable_raw_mode()?;
-    execute!(stdout, cursor::RestorePosition, terminal::Clear(ClearType::FromCursorDown))?;
-    
+    execute!(
+        stdout,
+        cursor::RestorePosition,
+        terminal::Clear(ClearType::FromCursorDown)
+    )?;
+
     match result {
         Ok(services) => {
             if !services.is_empty() {
-                println!("Selected services: {}\n", 
-                    services.iter()
+                println!(
+                    "Selected services: {}\n",
+                    services
+                        .iter()
                         .map(|s| s.name)
                         .collect::<Vec<_>>()
-                        .join(", "));
+                        .join(", ")
+                );
             }
             Ok(services)
         }
-        Err(e) => Err(e)
+        Err(e) => Err(e),
     }
 }
 
 fn select_mode(service_name: &str) -> Result<bool> {
     let mut stdout = io::stdout();
     let mut use_yolo = true; // Default to yolo mode
-    
+
     // Save cursor position and enable raw mode
     execute!(stdout, cursor::SavePosition)?;
     terminal::enable_raw_mode()?;
-    
+
     let result = (|| -> Result<bool> {
         loop {
             // Restore cursor position and clear from there
@@ -257,24 +284,35 @@ fn select_mode(service_name: &str) -> Result<bool> {
                 cursor::RestorePosition,
                 terminal::Clear(ClearType::FromCursorDown)
             )?;
-            
+
             writeln!(stdout, "Select mode for {}:", service_name)?;
-            writeln!(stdout, "(Use ↑/↓ to select, Enter to confirm, Ctrl+C to exit)\r")?;
+            writeln!(
+                stdout,
+                "(Use ↑/↓ to select, Enter to confirm, Ctrl+C to exit)\r"
+            )?;
             writeln!(stdout, "\r")?;
-            
+
             let normal_line = " [ ] Normal mode (will ask for permissions)";
             let yolo_line = " [ ] YOLO mode (skip permission prompts)";
-            
+
             if use_yolo {
                 writeln!(stdout, "{}\r", normal_line)?;
-                writeln!(stdout, "{}\r", yolo_line.replace("[ ]", "[✓]").on_dark_grey().white())?;
+                writeln!(
+                    stdout,
+                    "{}\r",
+                    yolo_line.replace("[ ]", "[✓]").on_dark_grey().white()
+                )?;
             } else {
-                writeln!(stdout, "{}\r", normal_line.replace("[ ]", "[✓]").on_dark_grey().white())?;
+                writeln!(
+                    stdout,
+                    "{}\r",
+                    normal_line.replace("[ ]", "[✓]").on_dark_grey().white()
+                )?;
                 writeln!(stdout, "{}\r", yolo_line)?;
             }
-            
+
             stdout.flush()?;
-            
+
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Up | KeyCode::Down => {
@@ -286,13 +324,21 @@ fn select_mode(service_name: &str) -> Result<bool> {
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         // Handle Ctrl+C
                         terminal::disable_raw_mode()?;
-                        execute!(stdout, cursor::RestorePosition, terminal::Clear(ClearType::FromCursorDown))?;
+                        execute!(
+                            stdout,
+                            cursor::RestorePosition,
+                            terminal::Clear(ClearType::FromCursorDown)
+                        )?;
                         println!("\r\nCancelled.");
                         std::process::exit(0);
                     }
                     KeyCode::Esc | KeyCode::Char('q') => {
                         terminal::disable_raw_mode()?;
-                        execute!(stdout, cursor::RestorePosition, terminal::Clear(ClearType::FromCursorDown))?;
+                        execute!(
+                            stdout,
+                            cursor::RestorePosition,
+                            terminal::Clear(ClearType::FromCursorDown)
+                        )?;
                         println!("\r\nCancelled.");
                         std::process::exit(0);
                     }
@@ -300,14 +346,18 @@ fn select_mode(service_name: &str) -> Result<bool> {
                 }
             }
         }
-        
+
         Ok(use_yolo)
     })();
-    
+
     // Always disable raw mode and restore cursor
     terminal::disable_raw_mode()?;
-    execute!(stdout, cursor::RestorePosition, terminal::Clear(ClearType::FromCursorDown))?;
-    
+    execute!(
+        stdout,
+        cursor::RestorePosition,
+        terminal::Clear(ClearType::FromCursorDown)
+    )?;
+
     result
 }
 
@@ -331,7 +381,10 @@ fn select_terminal_mode() -> Result<Mode> {
             )?;
 
             writeln!(stdout, "Select mode:")?;
-            writeln!(stdout, "(Use ↑/↓ to select, Enter to confirm, Ctrl+C to exit)\r")?;
+            writeln!(
+                stdout,
+                "(Use ↑/↓ to select, Enter to confirm, Ctrl+C to exit)\r"
+            )?;
             writeln!(stdout, "\r")?;
 
             #[cfg(target_os = "macos")]
@@ -343,7 +396,11 @@ fn select_terminal_mode() -> Result<Mode> {
                 ];
                 for (i, line) in options.iter().enumerate() {
                     if selection == i as i32 {
-                        writeln!(stdout, "{}\r", line.replace("[ ]", "[✓]").on_dark_grey().white())?;
+                        writeln!(
+                            stdout,
+                            "{}\r",
+                            line.replace("[ ]", "[✓]").on_dark_grey().white()
+                        )?;
                     } else {
                         writeln!(stdout, "{}\r", line)?;
                     }
@@ -352,13 +409,14 @@ fn select_terminal_mode() -> Result<Mode> {
 
             #[cfg(not(target_os = "macos"))]
             {
-                let options = [
-                    " [ ] tmux multi-window",
-                    " [ ] tmux single-window",
-                ];
+                let options = [" [ ] tmux multi-window", " [ ] tmux single-window"];
                 for (i, line) in options.iter().enumerate() {
                     if selection == i as i32 {
-                        writeln!(stdout, "{}\r", line.replace("[ ]", "[✓]").on_dark_grey().white())?;
+                        writeln!(
+                            stdout,
+                            "{}\r",
+                            line.replace("[ ]", "[✓]").on_dark_grey().white()
+                        )?;
                     } else {
                         writeln!(stdout, "{}\r", line)?;
                     }
@@ -395,13 +453,21 @@ fn select_terminal_mode() -> Result<Mode> {
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         // Handle Ctrl+C
                         terminal::disable_raw_mode()?;
-                        execute!(stdout, cursor::RestorePosition, terminal::Clear(ClearType::FromCursorDown))?;
+                        execute!(
+                            stdout,
+                            cursor::RestorePosition,
+                            terminal::Clear(ClearType::FromCursorDown)
+                        )?;
                         println!("\r\nCancelled.");
                         std::process::exit(0);
                     }
                     KeyCode::Esc | KeyCode::Char('q') => {
                         terminal::disable_raw_mode()?;
-                        execute!(stdout, cursor::RestorePosition, terminal::Clear(ClearType::FromCursorDown))?;
+                        execute!(
+                            stdout,
+                            cursor::RestorePosition,
+                            terminal::Clear(ClearType::FromCursorDown)
+                        )?;
                         println!("\r\nCancelled.");
                         std::process::exit(0);
                     }
@@ -427,7 +493,11 @@ fn select_terminal_mode() -> Result<Mode> {
     })();
 
     terminal::disable_raw_mode()?;
-    execute!(stdout, cursor::RestorePosition, terminal::Clear(ClearType::FromCursorDown))?;
+    execute!(
+        stdout,
+        cursor::RestorePosition,
+        terminal::Clear(ClearType::FromCursorDown)
+    )?;
 
     result
 }
@@ -438,10 +508,10 @@ fn ask_yes_no(question: &str) -> Result<bool> {
     loop {
         print!("{} [y/n]: ", question);
         io::stdout().flush()?;
-        
+
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-        
+
         match input.trim().to_lowercase().as_str() {
             "y" | "yes" => return Ok(true),
             "n" | "no" => return Ok(false),

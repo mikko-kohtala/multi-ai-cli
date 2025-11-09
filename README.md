@@ -15,16 +15,16 @@ The following AI development tools are supported:
 ## Features
 
 - 🌳 **Git Worktree Management**: Automatically creates and manages git worktrees for each AI tool
-- 🖥️ **iTerm2 Integration** (default): Creates tabs with split panes for each AI application
-- 🎛️ **Tmux Support** (optional): Creates tmux sessions with organized windows and panes
+- 🖥️ **iTerm2 Integration** (`mode: "iterm2"` on macOS): Creates tabs with split panes for each AI application
+- 🎛️ **Tmux Support** (`mode: "tmux-single-window"` or `"tmux-multi-window"`): Creates tmux sessions with organized windows and panes
 - 🎨 **Flexible Configuration**: Define custom commands for each AI tool
 - 🚀 **Quick Setup**: Single command to set up multiple AI environments
 
 ## Prerequisites
 
 - [gwt CLI](https://github.com/mikko-kohtala/git-worktree-cli) - Git worktree management tool
-- iTerm2 (for default mode on macOS)
-- tmux (optional, for `--tmux` flag)
+- iTerm2 (only if you plan to use `mode: "iterm2"` on macOS)
+- tmux (required when `mode` is a tmux layout or when overriding via `--mode`/`--tmux`)
 
 ## Installation
 
@@ -92,7 +92,7 @@ Or create it manually:
 ### Configuration Fields
 
 - `terminals_per_column` (optional): Number of terminal panes per column (default: 2). The first pane runs the AI command, additional panes are shell terminals
-- `mode` (required): One of `"iterm2"`, `"tmux-single-window"`, `"tmux-multi-window"`. On Linux, `iterm2` is not supported. The CLI flag `--tmux` overrides to `tmux-multi-window`
+- `mode` (required): One of `"iterm2"`, `"tmux-single-window"`, `"tmux-multi-window"`. On Linux, `iterm2` is unavailable. Use the CLI flag `--mode` (or legacy `--tmux`) for one-off overrides.
 - `ai_apps`: Array of AI applications to configure
   - `name`: The name of the AI tool (used for branch naming)
   - `command`: The full command to launch the AI tool with any flags
@@ -103,18 +103,18 @@ Or create it manually:
 
 ### Create worktrees and terminal sessions
 
-**Default (uses config):**
 ```bash
 # From your project directory:
 cd ~/code/my-project
-mai add feature-branch   # Uses mode from config
+mai add feature-branch   # Respects the mode defined in multi-ai-config.jsonc
 ```
 
-**With tmux:**
+Need a different layout for a single run? Use the new `--mode` flag (or `--tmux` as a shorthand for `tmux-multi-window`):
+
 ```bash
-# From your project directory:
-cd ~/code/my-project
-mai add feature-branch --tmux  # Overrides to tmux-multi-window
+mai add feature-branch --mode tmux-single-window
+# legacy alias:
+mai add feature-branch --tmux
 ```
 
 This will:
@@ -131,8 +131,9 @@ This will:
 cd ~/code/my-project
 mai remove feature-branch
 
-# With tmux:
-mai remove feature-branch --tmux
+# Override cleanup behavior or skip confirmation:
+mai remove feature-branch --mode tmux-multi-window
+mai remove feature-branch --force   # removes without prompting
 ```
 
 ## Terminal Layout
@@ -167,6 +168,7 @@ mai init  # Interactive setup
 # OR manually create multi-ai-config.jsonc:
 cat > multi-ai-config.jsonc << 'EOF'
 {
+  "mode": "iterm2",
   "ai_apps": [
     {
       "name": "claude",
@@ -197,7 +199,7 @@ mai remove new-feature
 
 ## Tmux Navigation
 
-When using tmux:
+When `mode` selects a tmux layout (or you override with `--mode`/`--tmux`):
 - Switch windows: `Ctrl+b` then window number (0, 1, 2...)
 - Switch panes: `Ctrl+b` then arrow keys
 - Detach from session: `Ctrl+b` then `d`

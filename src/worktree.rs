@@ -1,7 +1,7 @@
 use crate::error::{MultiAiError, Result};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::io::{BufRead, BufReader};
 
 pub struct WorktreeManager {
     project_path: PathBuf,
@@ -14,10 +14,10 @@ impl WorktreeManager {
 
     pub fn add_worktree(&self, branch_name: &str) -> Result<PathBuf> {
         let worktree_path = self.project_path.join(branch_name);
-        
+
         if !self.has_gwt_cli() {
             return Err(MultiAiError::Worktree(
-                "gwt CLI is not installed or not in PATH".to_string()
+                "gwt CLI is not installed or not in PATH".to_string(),
             ));
         }
 
@@ -41,7 +41,8 @@ impl WorktreeManager {
         }
 
         // Wait for the process to complete and check status
-        let status = child.wait()
+        let status = child
+            .wait()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to wait for gwt: {}", e)))?;
 
         if !status.success() {
@@ -56,10 +57,14 @@ impl WorktreeManager {
                     }
                 }
             }
-            
+
             return Err(MultiAiError::Worktree(format!(
                 "Failed to create worktree: {}",
-                if stderr_msg.is_empty() { "Unknown error" } else { &stderr_msg }
+                if stderr_msg.is_empty() {
+                    "Unknown error"
+                } else {
+                    &stderr_msg
+                }
             )));
         }
 
@@ -77,7 +82,7 @@ impl WorktreeManager {
     pub fn remove_worktree(&self, branch_name: &str) -> Result<()> {
         if !self.has_gwt_cli() {
             return Err(MultiAiError::Worktree(
-                "gwt CLI is not installed or not in PATH".to_string()
+                "gwt CLI is not installed or not in PATH".to_string(),
             ));
         }
 
@@ -89,7 +94,9 @@ impl WorktreeManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to execute gwt remove: {}", e)))?;
+            .map_err(|e| {
+                MultiAiError::CommandFailed(format!("Failed to execute gwt remove: {}", e))
+            })?;
 
         // Stream stdout
         if let Some(stdout) = child.stdout.take() {
@@ -102,8 +109,9 @@ impl WorktreeManager {
         }
 
         // Wait for the process to complete and check status
-        let status = child.wait()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to wait for gwt remove: {}", e)))?;
+        let status = child.wait().map_err(|e| {
+            MultiAiError::CommandFailed(format!("Failed to wait for gwt remove: {}", e))
+        })?;
 
         if !status.success() {
             // Capture any stderr output
@@ -117,10 +125,14 @@ impl WorktreeManager {
                     }
                 }
             }
-            
+
             return Err(MultiAiError::Worktree(format!(
                 "Failed to remove worktree: {}",
-                if stderr_msg.is_empty() { "Unknown error" } else { &stderr_msg }
+                if stderr_msg.is_empty() {
+                    "Unknown error"
+                } else {
+                    &stderr_msg
+                }
             )));
         }
 
@@ -133,13 +145,13 @@ impl WorktreeManager {
         if gwt_config_jsonc.exists() {
             return true;
         }
-        
+
         // Also check for .yaml for backward compatibility
         let gwt_config_yaml = self.project_path.join("git-worktree-config.yaml");
         if gwt_config_yaml.exists() {
             return true;
         }
-        
+
         // Also try running gwt list to see if it's a valid gwt project
         Command::new("gwt")
             .arg("list")
