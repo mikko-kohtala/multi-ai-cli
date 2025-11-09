@@ -20,6 +20,7 @@ pub enum MultiAiError {
     #[error("Tmux error: {0}")]
     Tmux(String),
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     #[error("iTerm2 error: {0}")]
     ITerm2(String),
 

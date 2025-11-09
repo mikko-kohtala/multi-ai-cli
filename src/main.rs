@@ -1,6 +1,7 @@
 mod config;
 mod error;
 mod init;
+#[cfg(target_os = "macos")]
 mod iterm2;
 mod tmux;
 mod worktree;
@@ -8,6 +9,7 @@ mod worktree;
 use clap::{Parser, ValueEnum};
 use config::{Mode, ProjectConfig, TmuxLayout};
 use error::{MultiAiError, Result};
+#[cfg(target_os = "macos")]
 use iterm2::ITerm2Manager;
 use std::fs;
 use std::io::{self, Write};
@@ -255,12 +257,7 @@ fn create_command(
     if mode.is_none() {
         mode = project_config.mode.clone();
     }
-    let mode = mode.ok_or_else(|| {
-        MultiAiError::Config(
-            "No terminal mode configured. Add \"mode\" to multi-ai-config.jsonc or pass --mode/--tmux."
-                .to_string(),
-        )
-    })?;
+    let mode = mode.unwrap_or(Mode::TmuxMultiWindow);
 
     match mode {
         Mode::Iterm2 => {

@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use crate::config::AiApp;
 use crate::error::{MultiAiError, Result};
 use std::process::Command;
