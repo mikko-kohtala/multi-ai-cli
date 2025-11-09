@@ -361,13 +361,37 @@ fn select_mode(service_name: &str) -> Result<bool> {
     result
 }
 
+fn render_options(stdout: &mut io::Stdout, options: &[&str], selected_index: i32) -> Result<()> {
+    for (i, line) in options.iter().enumerate() {
+        if selected_index == i as i32 {
+            writeln!(
+                stdout,
+                "{}\r",
+                line.replace("[ ]", "[✓]").on_dark_grey().white()
+            )?;
+        } else {
+            writeln!(stdout, "{}\r", line)?;
+        }
+    }
+    Ok(())
+}
+
 fn select_terminal_mode() -> Result<Mode> {
     let mut stdout = io::stdout();
-    // Default selection depends on OS: iTerm2 on macOS, tmux-multi-window otherwise
+    // Default selection matches the platform default mode
+    let default_mode = Mode::default_for_platform();
     #[cfg(target_os = "macos")]
-    let mut selection: i32 = 0; // 0: iterm2, 1: tmux-multi, 2: tmux-single
+    let mut selection: i32 = match default_mode {
+        Mode::Iterm2 => 0,
+        Mode::TmuxMultiWindow => 1,
+        Mode::TmuxSingleWindow => 2,
+    };
     #[cfg(not(target_os = "macos"))]
-    let mut selection: i32 = 0; // 0: tmux-multi, 1: tmux-single
+    let mut selection: i32 = match default_mode {
+        Mode::TmuxMultiWindow => 0,
+        Mode::TmuxSingleWindow => 1,
+        Mode::Iterm2 => 0, // Shouldn't happen on non-macOS, but handle it
+    };
 
     execute!(stdout, cursor::SavePosition)?;
     terminal::enable_raw_mode()?;
@@ -394,33 +418,13 @@ fn select_terminal_mode() -> Result<Mode> {
                     " [ ] tmux multi-window",
                     " [ ] tmux single-window",
                 ];
-                for (i, line) in options.iter().enumerate() {
-                    if selection == i as i32 {
-                        writeln!(
-                            stdout,
-                            "{}\r",
-                            line.replace("[ ]", "[✓]").on_dark_grey().white()
-                        )?;
-                    } else {
-                        writeln!(stdout, "{}\r", line)?;
-                    }
-                }
+                render_options(&mut stdout, &options, selection)?;
             }
 
             #[cfg(not(target_os = "macos"))]
             {
                 let options = [" [ ] tmux multi-window", " [ ] tmux single-window"];
-                for (i, line) in options.iter().enumerate() {
-                    if selection == i as i32 {
-                        writeln!(
-                            stdout,
-                            "{}\r",
-                            line.replace("[ ]", "[✓]").on_dark_grey().white()
-                        )?;
-                    } else {
-                        writeln!(stdout, "{}\r", line)?;
-                    }
-                }
+                render_options(&mut stdout, &options, selection)?;
             }
 
             stdout.flush()?;

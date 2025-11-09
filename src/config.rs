@@ -28,6 +28,17 @@ pub enum Mode {
     TmuxMultiWindow,
 }
 
+impl Mode {
+    /// Returns the default mode for the current platform
+    pub fn default_for_platform() -> Self {
+        #[cfg(target_os = "macos")]
+        return Mode::Iterm2;
+
+        #[cfg(not(target_os = "macos"))]
+        return Mode::TmuxSingleWindow;
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AiApp {
     pub name: String,
@@ -50,7 +61,7 @@ impl ProjectConfig {
         let mut parsed = jsonc_parser::parse_to_serde_value(content, &Default::default())?
             .ok_or_else(|| anyhow::anyhow!("Failed to parse JSON/JSONC content"))?;
 
-        // Prior to introducing the required `mode` field, configs didn't include it.
+        // For backward compatibility with configs that don't have the optional `mode` field.
         // Inject `null` so serde will populate `None` rather than erroring.
         if let serde_json::Value::Object(ref mut map) = parsed {
             map.entry("mode").or_insert(serde_json::Value::Null);
