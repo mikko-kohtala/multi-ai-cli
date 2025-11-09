@@ -350,9 +350,10 @@ impl TmuxManager {
         let leftmost_pane = self.current_pane_id_in_window(window_name)?;
         column_panes.push(leftmost_pane.clone());
 
-        // Create additional columns (one per remaining app) by repeatedly splitting the
-        // leftmost pane with carefully chosen percentages to produce equal-width columns.
-        // This approach yields N equal columns without relying on tmux layout heuristics.
+        // Create additional columns by repeatedly splitting the LEFTMOST pane.
+        // Using percentages based on the remaining column count yields equal-width columns.
+        // We insert each newly created pane just to the right of the leftmost entry so that
+        // column_panes remains in left-to-right order matching worktree_paths.
         for (idx, (_app, path)) in worktree_paths.iter().enumerate().skip(1) {
             let total = worktree_paths.len();
             let percentage = self.calculate_split_percentage(idx, total);
@@ -382,7 +383,8 @@ impl TmuxManager {
 
             // The new pane becomes active; capture its id as the top pane for this column
             let new_pane = self.current_pane_id_in_window(window_name)?;
-            column_panes.push(new_pane);
+            // Insert directly to the right of the leftmost entry to preserve left-to-right order
+            column_panes.insert(1, new_pane.clone());
         }
 
         // For each column, split vertically to create shell pane and launch AI in the top pane
