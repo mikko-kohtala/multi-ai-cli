@@ -57,6 +57,9 @@ enum Command {
 
         #[arg(long, help = "Terminal mode: iterm2, tmux-multi-window, or tmux-single-window. Defaults to system default or config file setting")]
         mode: Option<String>,
+
+        #[arg(long, help = "Skip confirmation prompt")]
+        force: bool,
     },
 }
 
@@ -70,8 +73,8 @@ fn main() -> Result<()> {
         Some(Command::Add { branch_prefix, mode }) => {
             create_command(branch_prefix, mode)
         }
-        Some(Command::Remove { branch_prefix, mode }) => {
-            remove_command(branch_prefix, mode)
+        Some(Command::Remove { branch_prefix, mode, force }) => {
+            remove_command(branch_prefix, mode, force)
         }
         None => {
             eprintln!("Error: Command required. Use 'mai add <branch-prefix>' or 'mai remove <branch-prefix>'");
@@ -236,7 +239,7 @@ fn create_command(branch_prefix: String, mode_arg: Option<String>) -> Result<()>
     Ok(())
 }
 
-fn remove_command(branch_prefix: String, mode_arg: Option<String>) -> Result<()> {
+fn remove_command(branch_prefix: String, mode_arg: Option<String>, force: bool) -> Result<()> {
     let project_path = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
@@ -284,26 +287,28 @@ fn remove_command(branch_prefix: String, mode_arg: Option<String>) -> Result<()>
         ));
     }
 
-    // Ask for confirmation
-    println!("⚠️  You are about to remove:");
-    println!("  - Worktrees for branches:");
-    for ai_app in &project_config.ai_apps {
-        let branch_name = format!("{}-{}", branch_prefix, ai_app.as_str());
-        println!("    • {}", branch_name);
-    }
-    match terminal_mode {
-        TerminalMode::TmuxMultiWindow | TerminalMode::TmuxSingleWindow => {
-            println!("  - Tmux session: {}-{}", project_name, branch_prefix);
+    // Ask for confirmation unless --force is used
+    if !force {
+        println!("⚠️  You are about to remove:");
+        println!("  - Worktrees for branches:");
+        for ai_app in &project_config.ai_apps {
+            let branch_name = format!("{}-{}", branch_prefix, ai_app.as_str());
+            println!("    • {}", branch_name);
         }
-        TerminalMode::Iterm2 => {
-            println!("  - Note: iTerm2 tabs must be closed manually");
+        match terminal_mode {
+            TerminalMode::TmuxMultiWindow | TerminalMode::TmuxSingleWindow => {
+                println!("  - Tmux session: {}-{}", project_name, branch_prefix);
+            }
+            TerminalMode::Iterm2 => {
+                println!("  - Note: iTerm2 tabs must be closed manually");
+            }
         }
-    }
-    println!();
+        println!();
 
-    if !ask_confirmation("Are you sure you want to remove these worktrees and session?")? {
-        println!("Removal cancelled.");
-        return Ok(());
+        if !ask_confirmation("Are you sure you want to remove these worktrees and session?")? {
+            println!("Removal cancelled.");
+            return Ok(());
+        }
     }
 
     match terminal_mode {

@@ -77,40 +77,80 @@ impl TmuxManager {
             return Err(MultiAiError::Tmux(format!("Failed to create session: {}", stderr)));
         }
 
-        // Create vertical splits for additional AI apps (creating columns)
+        // Small delay to ensure session is fully initialized
+        thread::sleep(Duration::from_millis(100));
+
+        // Create horizontal splits for additional AI apps (creating columns side-by-side)
+        // NOTE: tmux panes are indexed starting from 1, not 0!
+        // We always target the leftmost pane (pane 1) and split it to create equal columns
         for (idx, (_, worktree_path)) in worktree_paths.iter().enumerate().skip(1) {
             let num_apps = worktree_paths.len();
             let percentage = self.calculate_split_percentage(idx, num_apps);
 
+            // Split pane 1 horizontally (this creates a new pane to the right)
             let output = Command::new("tmux")
                 .args([
                     "split-window",
-                    "-v",
-                    "-t", &format!("{}:all-apps", self.session_name),
+                    "-h",  // Horizontal split creates columns (left-right)
+                    "-t", &format!("{}:all-apps.1", self.session_name),  // Always split pane 1 (leftmost)
                     "-c", worktree_path,
                     "-p", &percentage.to_string(),
                 ])
                 .output()
-                .map_err(|e| MultiAiError::CommandFailed(format!("Failed to split vertically: {}", e)))?;
+                .map_err(|e| MultiAiError::CommandFailed(format!("Failed to split horizontally: {}", e)))?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(MultiAiError::Tmux(format!("Failed to split window vertically: {}", stderr)));
+                return Err(MultiAiError::Tmux(format!("Failed to split window horizontally: {}", stderr)));
             }
+
+            // Select pane 1 again to ensure next split targets the leftmost pane
+            Command::new("tmux")
+                .args([
+                    "select-pane",
+                    "-t", &format!("{}:all-apps.1", self.session_name),
+                ])
+                .output()
+                .map_err(|e| MultiAiError::CommandFailed(format!("Failed to select pane: {}", e)))?;
         }
 
-        // Now split each column horizontally for the shell pane
-        for (pane_idx, (ai_app, worktree_path)) in worktree_paths.iter().enumerate() {
-            self.split_pane_horizontally(pane_idx, worktree_path)?;
+        // Now split each column vertically to add a shell pane below the AI pane
+        // After the horizontal splits above, we have panes 1, 2, 3, ... (left to right)
+        // NOTE: tmux uses 1-based indexing!
+        for (col_idx, (ai_app, worktree_path)) in worktree_paths.iter().enumerate() {
+            let pane_num = col_idx + 1;  // Convert 0-based index to 1-based pane number
 
-            // Send the AI command to the first (left) pane of this row
+            // Split this column vertically (top-bottom)
+            let output = Command::new("tmux")
+                .args([
+                    "split-window",
+                    "-v",  // Vertical split creates rows (top-bottom)
+                    "-t", &format!("{}:all-apps.{}", self.session_name, pane_num),
+                    "-c", worktree_path,
+                    "-p", "50",  // 50% split
+                ])
+                .output()
+                .map_err(|e| MultiAiError::CommandFailed(format!("Failed to split column vertically: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(MultiAiError::Tmux(format!("Failed to split column {}: {}", pane_num, stderr)));
+            }
+
+            // After splitting vertically, the pane numbering changes:
+            // If we had panes [1, 2, 3] and split pane 1, we now have [1(top), 2(bottom), 3, 4]
+            // After splitting pane 3 (which was originally pane 2), we have [1, 2, 3(top), 4(bottom), 5]
+            // The top pane for each column is at: (col_idx * 2) + 1
+
             thread::sleep(Duration::from_millis(500));
 
+            // Send the AI command to the top pane of this column
+            let top_pane_idx = (col_idx * 2) + 1;
             let launch_command = format!("cd {} && {}", worktree_path, ai_app.command());
             let output = Command::new("tmux")
                 .args([
                     "send-keys",
-                    "-t", &format!("{}:all-apps.{}", self.session_name, pane_idx * 2),
+                    "-t", &format!("{}:all-apps.{}", self.session_name, top_pane_idx),
                     &launch_command,
                     "Enter",
                 ])
@@ -123,11 +163,11 @@ impl TmuxManager {
             }
         }
 
-        // Select the first pane
+        // Select the first pane (top-left)
         Command::new("tmux")
             .args([
                 "select-pane",
-                "-t", &format!("{}:all-apps.0", self.session_name),
+                "-t", &format!("{}:all-apps.1", self.session_name),  // Pane 1, not 0
             ])
             .output()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to select pane: {}", e)))?;
@@ -136,30 +176,11 @@ impl TmuxManager {
     }
 
     fn calculate_split_percentage(&self, current_idx: usize, total: usize) -> usize {
-        // Calculate the percentage for the new pane in a vertical split
+        // Calculate the percentage for the new pane in a split
         // This ensures equal distribution of space
+        // When we split pane 0, the new pane should take up 1/remaining of the current pane's space
         let remaining_panes = total - current_idx;
         100 / remaining_panes
-    }
-
-    fn split_pane_horizontally(&self, pane_idx: usize, worktree_path: &str) -> Result<()> {
-        let output = Command::new("tmux")
-            .args([
-                "split-window",
-                "-h",
-                "-t", &format!("{}:all-apps.{}", self.session_name, pane_idx),
-                "-c", worktree_path,
-                "-p", "50",
-            ])
-            .output()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to split horizontally: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MultiAiError::Tmux(format!("Failed to split pane horizontally: {}", stderr)));
-        }
-
-        Ok(())
     }
 
     fn create_initial_window(&self, ai_app: &AiApp, worktree_path: &str) -> Result<()> {
