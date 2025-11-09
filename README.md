@@ -17,6 +17,8 @@ The following AI development tools are supported:
 - 🌳 **Git Worktree Management**: Automatically creates and manages git worktrees for each AI tool
 - 🖥️ **iTerm2 Integration** (default): Creates tabs with split panes for each AI application
 - 🎛️ **Tmux Support** (optional): Creates tmux sessions with organized windows and panes
+  - **Multi-Window Layout** (default): One window per AI app - ideal for focused work
+  - **Single-Window Layout**: All apps in columns - ideal for side-by-side comparison
 - 🎨 **Flexible Configuration**: Define custom commands for each AI tool
 - 🚀 **Quick Setup**: Single command to set up multiple AI environments
 
@@ -58,6 +60,7 @@ Or create it manually:
 
 ```jsonc
 {
+  "terminal_mode": "tmux-single-window", // Optional: "iterm2", "tmux-multi-window", or "tmux-single-window"
   "terminals_per_column": 2,  // Number of terminal panes per column (first is AI command, rest are shells)
   "ai_apps": [
     {
@@ -65,7 +68,7 @@ Or create it manually:
       "command": "claude --dangerously-skip-permissions"
     },
     {
-      "name": "gemini", 
+      "name": "gemini",
       "command": "gemini --yolo"
     },
     {
@@ -90,6 +93,11 @@ Or create it manually:
 
 ### Configuration Fields
 
+- `terminal_mode` (optional): Terminal mode to use. Valid values:
+  - `"iterm2"` - iTerm2 mode (macOS only, default on macOS)
+  - `"tmux-multi-window"` - Tmux with one window per AI app
+  - `"tmux-single-window"` - Tmux with all apps in one window (default on Linux)
+  - If not specified, uses system default. Can be overridden with `--mode` CLI flag.
 - `terminals_per_column` (optional): Number of terminal panes per column (default: 2). The first pane runs the AI command, additional panes are shell terminals
 - `ai_apps`: Array of AI applications to configure
   - `name`: The name of the AI tool (used for branch naming)
@@ -101,41 +109,47 @@ Or create it manually:
 
 ### Create worktrees and terminal sessions
 
-**Default (iTerm2):**
+**Use system default (or config file setting):**
 ```bash
 # From your project directory:
 cd ~/code/my-project
 mai add feature-branch
+# Uses: iTerm2 on macOS, tmux-single-window on Linux, or terminal_mode from config
 ```
 
-**With tmux:**
+**Explicit mode selection:**
 ```bash
-# From your project directory:
-cd ~/code/my-project
-mai add feature-branch --tmux
+# iTerm2 mode (macOS only):
+mai add feature-branch --mode iterm2
+
+# Tmux multi-window mode (one window per AI app):
+mai add feature-branch --mode tmux-multi-window
+
+# Tmux single-window mode (all apps in one window):
+mai add feature-branch --mode tmux-single-window
 ```
 
 This will:
 1. Create git worktrees for each AI app (e.g., `feature-branch-claude`, `feature-branch-gemini`)
-2. Create iTerm2 tabs (or tmux windows) for each AI application
-3. Each tab/window has two panes:
-   - Top pane: Runs the AI tool with specified command
-   - Bottom pane: Shell in the worktree directory for manual commands
+2. Create terminal sessions based on the selected mode
+3. Each session has panes for:
+   - Running the AI tool with specified command
+   - Shell in the worktree directory for manual commands
 
 ### Remove worktrees and cleanup
 
 ```bash
-# From your project directory:
+# From your project directory (uses system default or config):
 cd ~/code/my-project
 mai remove feature-branch
 
-# With tmux:
-mai remove feature-branch --tmux
+# With explicit mode:
+mai remove feature-branch --mode tmux-single-window
 ```
 
 ## Terminal Layout
 
-### iTerm2 Mode (Default)
+### iTerm2 Mode (Default on macOS)
 - Creates a single tab with all AI applications
 - Column-based layout: each AI app gets a vertical column with 2 panes
   - 1 app: 1x2 layout (1 column, 2 rows)
@@ -145,10 +159,26 @@ mai remove feature-branch --tmux
 - Top pane in each column: runs the AI tool
 - Bottom pane in each column: shell for manual commands
 
-### Tmux Mode
+### Tmux Mode (v0.11.0+)
+
+**Multi-Window Layout (default - `--tmux`):**
 - Creates a single tmux session named `<project>-<branch-prefix>`
-- One window per AI application  
-- Each window split into two panes
+- One window per AI application
+- Each window split into two panes:
+  - Left pane (50%): Runs the AI tool
+  - Right pane (50%): Shell for manual commands
+- Switch between windows with `Ctrl+b` followed by window number
+- Best for: Focused work on one AI tool at a time
+
+**Single-Window Layout (`--tmux --tmux-layout single-window`):**
+- Creates a single tmux session with ONE window containing all AI apps
+- Vertical columns layout (similar to iTerm2 mode):
+  - Each AI app gets its own column
+  - Each column split horizontally into two panes
+  - Top pane: Runs the AI tool
+  - Bottom pane: Shell for manual commands
+- All AI tools visible at once
+- Best for: Side-by-side comparison of AI responses
 
 ## Example Workflow
 
@@ -194,11 +224,15 @@ mai remove new-feature
 
 ## Tmux Navigation
 
-When using `--tmux` flag:
-- Switch windows: `Ctrl+b` followed by window number (0, 1, 2...)
-- Switch panes: `Ctrl+b` followed by arrow keys
-- Detach from session: `Ctrl+b` followed by `d`
-- Reattach to session: `tmux attach -t <session-name>`
+When using tmux modes (default on Linux):
+- **Multi-window mode**:
+  - Switch windows: `Ctrl+b` followed by window number (0, 1, 2...)
+  - Switch panes: `Ctrl+b` followed by arrow keys
+- **Single-window mode**:
+  - Switch panes: `Ctrl+b` followed by arrow keys
+- **General**:
+  - Detach from session: `Ctrl+b` followed by `d`
+  - Reattach to session: `tmux attach -t <session-name>`
 
 ## License
 

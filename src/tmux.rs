@@ -4,17 +4,26 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
+#[derive(Debug, Clone, Copy)]
+pub enum TmuxLayout {
+    MultiWindow,
+    SingleWindow,
+}
+
+// TmuxLayout is now internal only - TerminalMode in config.rs is used for external configuration
+
 pub struct TmuxManager {
     session_name: String,
+    layout: TmuxLayout,
 }
 
 impl TmuxManager {
-    pub fn new(project_name: &str, branch_prefix: &str) -> Self {
+    pub fn new(project_name: &str, branch_prefix: &str, layout: TmuxLayout) -> Self {
         let session_name = format!("{}-{}", project_name, branch_prefix);
-        Self { session_name }
+        Self { session_name, layout }
     }
 
-    pub fn create_session(&self, _ai_apps: &[AiApp], worktree_paths: &[(AiApp, String)]) -> Result<()> {
+    pub fn create_session(&self, ai_apps: &[AiApp], worktree_paths: &[(AiApp, String)]) -> Result<()> {
         if !self.is_tmux_installed() {
             return Err(MultiAiError::Tmux("tmux is not installed".to_string()));
         }
@@ -30,6 +39,13 @@ impl TmuxManager {
             return Err(MultiAiError::Tmux("No worktrees to create session for".to_string()));
         }
 
+        match self.layout {
+            TmuxLayout::MultiWindow => self.create_session_multiwindow(worktree_paths),
+            TmuxLayout::SingleWindow => self.create_session_singlewindow(ai_apps, worktree_paths),
+        }
+    }
+
+    fn create_session_multiwindow(&self, worktree_paths: &[(AiApp, String)]) -> Result<()> {
         let first = &worktree_paths[0];
         self.create_initial_window(&first.0, &first.1)?;
 
@@ -38,6 +54,110 @@ impl TmuxManager {
         }
 
         self.select_first_window()?;
+
+        Ok(())
+    }
+
+    fn create_session_singlewindow(&self, _ai_apps: &[AiApp], worktree_paths: &[(AiApp, String)]) -> Result<()> {
+        // Create base session with first AI app's worktree
+        let first = &worktree_paths[0];
+        let output = Command::new("tmux")
+            .args([
+                "new-session",
+                "-d",
+                "-s", &self.session_name,
+                "-n", "all-apps",
+                "-c", &first.1,
+            ])
+            .output()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to create tmux session: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(MultiAiError::Tmux(format!("Failed to create session: {}", stderr)));
+        }
+
+        // Create vertical splits for additional AI apps (creating columns)
+        for (idx, (_, worktree_path)) in worktree_paths.iter().enumerate().skip(1) {
+            let num_apps = worktree_paths.len();
+            let percentage = self.calculate_split_percentage(idx, num_apps);
+
+            let output = Command::new("tmux")
+                .args([
+                    "split-window",
+                    "-v",
+                    "-t", &format!("{}:all-apps", self.session_name),
+                    "-c", worktree_path,
+                    "-p", &percentage.to_string(),
+                ])
+                .output()
+                .map_err(|e| MultiAiError::CommandFailed(format!("Failed to split vertically: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(MultiAiError::Tmux(format!("Failed to split window vertically: {}", stderr)));
+            }
+        }
+
+        // Now split each column horizontally for the shell pane
+        for (pane_idx, (ai_app, worktree_path)) in worktree_paths.iter().enumerate() {
+            self.split_pane_horizontally(pane_idx, worktree_path)?;
+
+            // Send the AI command to the first (left) pane of this row
+            thread::sleep(Duration::from_millis(500));
+
+            let launch_command = format!("cd {} && {}", worktree_path, ai_app.command());
+            let output = Command::new("tmux")
+                .args([
+                    "send-keys",
+                    "-t", &format!("{}:all-apps.{}", self.session_name, pane_idx * 2),
+                    &launch_command,
+                    "Enter",
+                ])
+                .output()
+                .map_err(|e| MultiAiError::CommandFailed(format!("Failed to send command: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(MultiAiError::Tmux(format!("Failed to send AI command: {}", stderr)));
+            }
+        }
+
+        // Select the first pane
+        Command::new("tmux")
+            .args([
+                "select-pane",
+                "-t", &format!("{}:all-apps.0", self.session_name),
+            ])
+            .output()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to select pane: {}", e)))?;
+
+        Ok(())
+    }
+
+    fn calculate_split_percentage(&self, current_idx: usize, total: usize) -> usize {
+        // Calculate the percentage for the new pane in a vertical split
+        // This ensures equal distribution of space
+        let remaining_panes = total - current_idx;
+        100 / remaining_panes
+    }
+
+    fn split_pane_horizontally(&self, pane_idx: usize, worktree_path: &str) -> Result<()> {
+        let output = Command::new("tmux")
+            .args([
+                "split-window",
+                "-h",
+                "-t", &format!("{}:all-apps.{}", self.session_name, pane_idx),
+                "-c", worktree_path,
+                "-p", "50",
+            ])
+            .output()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to split horizontally: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(MultiAiError::Tmux(format!("Failed to split pane horizontally: {}", stderr)));
+        }
 
         Ok(())
     }

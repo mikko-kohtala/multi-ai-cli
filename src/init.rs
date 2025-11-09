@@ -86,9 +86,10 @@ pub fn run_init() -> Result<()> {
         println!("  ✓ {} will use: {}", service.name, command);
     }
     
-    let config = ProjectConfig { 
+    let config = ProjectConfig {
         ai_apps: selected_apps,
         terminals_per_column: 2,  // Default value
+        terminal_mode: None,  // Let system default or CLI flag determine mode
     };
     
     let json_content = format!(

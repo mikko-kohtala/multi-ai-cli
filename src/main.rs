@@ -6,7 +6,7 @@ mod tmux;
 mod worktree;
 
 use clap::Parser;
-use config::ProjectConfig;
+use config::{ProjectConfig, TerminalMode};
 use error::{MultiAiError, Result};
 use iterm2::ITerm2Manager;
 use std::fs;
@@ -45,18 +45,18 @@ enum Command {
     Add {
         #[arg(help = "Branch prefix for the worktrees")]
         branch_prefix: String,
-        
-        #[arg(long, help = "Use tmux instead of iTerm2")]
-        tmux: bool,
+
+        #[arg(long, help = "Terminal mode: iterm2, tmux-multi-window, or tmux-single-window. Defaults to system default (iTerm2 on macOS, tmux-single-window on Linux) or config file setting")]
+        mode: Option<String>,
     },
-    
+
     #[command(about = "Remove worktrees and session for a branch prefix")]
     Remove {
         #[arg(help = "Branch prefix to remove")]
         branch_prefix: String,
-        
-        #[arg(long, help = "Remove tmux session instead of iTerm2 tabs")]
-        tmux: bool,
+
+        #[arg(long, help = "Terminal mode: iterm2, tmux-multi-window, or tmux-single-window. Defaults to system default or config file setting")]
+        mode: Option<String>,
     },
 }
 
@@ -67,11 +67,11 @@ fn main() -> Result<()> {
         Some(Command::Init) => {
             init::run_init()
         }
-        Some(Command::Add { branch_prefix, tmux }) => {
-            create_command(branch_prefix, tmux)
+        Some(Command::Add { branch_prefix, mode }) => {
+            create_command(branch_prefix, mode)
         }
-        Some(Command::Remove { branch_prefix, tmux }) => {
-            remove_command(branch_prefix, tmux)
+        Some(Command::Remove { branch_prefix, mode }) => {
+            remove_command(branch_prefix, mode)
         }
         None => {
             eprintln!("Error: Command required. Use 'mai add <branch-prefix>' or 'mai remove <branch-prefix>'");
@@ -81,10 +81,10 @@ fn main() -> Result<()> {
     }
 }
 
-fn create_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
+fn create_command(branch_prefix: String, mode_arg: Option<String>) -> Result<()> {
     let project_path = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
-    
+
     // Check for multi-ai-config.jsonc in current directory
     let config_path = project_path.join("multi-ai-config.jsonc");
     if !config_path.exists() {
@@ -92,7 +92,7 @@ fn create_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
             "multi-ai-config.jsonc not found in current directory. Please run 'mai add' from a directory containing this file.".to_string()
         ));
     }
-    
+
     // Check for git-worktree-config.jsonc in current directory
     let gwt_config_path = project_path.join("git-worktree-config.jsonc");
     if !gwt_config_path.exists() {
@@ -108,6 +108,19 @@ fn create_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
         .to_string();
 
     let project_config = load_project_config(&project_path)?;
+
+    // Determine terminal mode: CLI > config > system default
+    let terminal_mode = if let Some(mode_str) = mode_arg {
+        TerminalMode::from_str(&mode_str)
+            .ok_or_else(|| MultiAiError::Config(format!(
+                "Invalid terminal mode: '{}'. Valid options: iterm2, tmux-multi-window, tmux-single-window",
+                mode_str
+            )))?
+    } else if let Some(mode) = project_config.terminal_mode {
+        mode
+    } else {
+        TerminalMode::system_default()
+    };
 
     let worktree_manager = WorktreeManager::new(project_path.clone());
     
@@ -180,37 +193,53 @@ fn create_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
     
     println!("✓ All worktrees created successfully!");
 
-    if use_tmux {
-        let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
-        
-        println!("\nCreating tmux session '{}-{}'...", project_name, branch_prefix);
-        tmux_manager.create_session(&project_config.ai_apps, &worktree_paths)?;
-        
-        println!("✓ Tmux session created successfully!");
-        println!("\nAttaching to session...");
-        tmux_manager.attach_session()?;
-    } else {
-        let iterm2_manager = ITerm2Manager::new(&project_name, &branch_prefix, project_config.terminals_per_column);
-        
-        println!("\nCreating iTerm2 tabs for AI applications...");
-        println!("  Apps to create tabs for: {:?}", worktree_paths.iter().map(|(app, _)| app.as_str()).collect::<Vec<_>>());
-        println!("  Terminals per column: {}", project_config.terminals_per_column);
-        match iterm2_manager.create_tabs_per_app(&project_config.ai_apps, &worktree_paths) {
-            Ok(_) => println!("✓ iTerm2 tabs created successfully!"),
-            Err(e) => {
-                eprintln!("✗ Failed to create iTerm2 tabs: {}", e);
-                return Err(e);
+    // Validate terminal mode for platform
+    #[cfg(not(target_os = "macos"))]
+    if terminal_mode == TerminalMode::Iterm2 {
+        return Err(MultiAiError::Config(
+            "iTerm2 mode is only available on macOS. Please use --mode tmux-multi-window or --mode tmux-single-window on Linux.".to_string()
+        ));
+    }
+
+    match terminal_mode {
+        TerminalMode::Iterm2 => {
+            let iterm2_manager = ITerm2Manager::new(&project_name, &branch_prefix, project_config.terminals_per_column);
+
+            println!("\nCreating iTerm2 tabs for AI applications...");
+            println!("  Apps to create tabs for: {:?}", worktree_paths.iter().map(|(app, _)| app.as_str()).collect::<Vec<_>>());
+            println!("  Terminals per column: {}", project_config.terminals_per_column);
+            match iterm2_manager.create_tabs_per_app(&project_config.ai_apps, &worktree_paths) {
+                Ok(_) => println!("✓ iTerm2 tabs created successfully!"),
+                Err(e) => {
+                    eprintln!("✗ Failed to create iTerm2 tabs: {}", e);
+                    return Err(e);
+                }
             }
+        }
+        TerminalMode::TmuxMultiWindow | TerminalMode::TmuxSingleWindow => {
+            let layout = match terminal_mode {
+                TerminalMode::TmuxMultiWindow => tmux::TmuxLayout::MultiWindow,
+                TerminalMode::TmuxSingleWindow => tmux::TmuxLayout::SingleWindow,
+                _ => unreachable!(),
+            };
+            let tmux_manager = TmuxManager::new(&project_name, &branch_prefix, layout);
+
+            println!("\nCreating tmux session '{}-{}' with {:?} mode...", project_name, branch_prefix, terminal_mode);
+            tmux_manager.create_session(&project_config.ai_apps, &worktree_paths)?;
+
+            println!("✓ Tmux session created successfully!");
+            println!("\nAttaching to session...");
+            tmux_manager.attach_session()?;
         }
     }
 
     Ok(())
 }
 
-fn remove_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
+fn remove_command(branch_prefix: String, mode_arg: Option<String>) -> Result<()> {
     let project_path = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
-    
+
     // Check for multi-ai-config.jsonc in current directory
     let config_path = project_path.join("multi-ai-config.jsonc");
     if !config_path.exists() {
@@ -218,7 +247,7 @@ fn remove_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
             "multi-ai-config.jsonc not found in current directory. Please run 'mai remove' from a directory containing this file.".to_string()
         ));
     }
-    
+
     // Check for git-worktree-config.jsonc in current directory
     let gwt_config_path = project_path.join("git-worktree-config.jsonc");
     if !gwt_config_path.exists() {
@@ -234,6 +263,19 @@ fn remove_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
         .to_string();
 
     let project_config = load_project_config(&project_path)?;
+
+    // Determine terminal mode: CLI > config > system default
+    let terminal_mode = if let Some(mode_str) = mode_arg {
+        TerminalMode::from_str(&mode_str)
+            .ok_or_else(|| MultiAiError::Config(format!(
+                "Invalid terminal mode: '{}'. Valid options: iterm2, tmux-multi-window, tmux-single-window",
+                mode_str
+            )))?
+    } else if let Some(mode) = project_config.terminal_mode {
+        mode
+    } else {
+        TerminalMode::system_default()
+    };
     let worktree_manager = WorktreeManager::new(project_path.clone());
     
     if !worktree_manager.has_gwt_cli() {
@@ -249,29 +291,40 @@ fn remove_command(branch_prefix: String, use_tmux: bool) -> Result<()> {
         let branch_name = format!("{}-{}", branch_prefix, ai_app.as_str());
         println!("    • {}", branch_name);
     }
-    if use_tmux {
-        println!("  - Tmux session: {}-{}", project_name, branch_prefix);
-    } else {
-        println!("  - Note: iTerm2 tabs must be closed manually");
+    match terminal_mode {
+        TerminalMode::TmuxMultiWindow | TerminalMode::TmuxSingleWindow => {
+            println!("  - Tmux session: {}-{}", project_name, branch_prefix);
+        }
+        TerminalMode::Iterm2 => {
+            println!("  - Note: iTerm2 tabs must be closed manually");
+        }
     }
     println!();
-    
+
     if !ask_confirmation("Are you sure you want to remove these worktrees and session?")? {
         println!("Removal cancelled.");
         return Ok(());
     }
 
-    if use_tmux {
-        // Kill tmux session
-        let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
-        println!("Removing tmux session '{}-{}'...", project_name, branch_prefix);
-        match tmux_manager.kill_session() {
-            Ok(_) => println!("  ✓ Tmux session removed"),
-            Err(e) => eprintln!("  ⚠ Failed to remove tmux session: {}", e),
+    match terminal_mode {
+        TerminalMode::TmuxMultiWindow | TerminalMode::TmuxSingleWindow => {
+            // Kill tmux session - layout doesn't matter for removal
+            let layout = match terminal_mode {
+                TerminalMode::TmuxMultiWindow => tmux::TmuxLayout::MultiWindow,
+                TerminalMode::TmuxSingleWindow => tmux::TmuxLayout::SingleWindow,
+                _ => unreachable!(),
+            };
+            let tmux_manager = TmuxManager::new(&project_name, &branch_prefix, layout);
+            println!("Removing tmux session '{}-{}'...", project_name, branch_prefix);
+            match tmux_manager.kill_session() {
+                Ok(_) => println!("  ✓ Tmux session removed"),
+                Err(e) => eprintln!("  ⚠ Failed to remove tmux session: {}", e),
+            }
         }
-    } else {
-        // For iTerm2, we can't programmatically close tabs, just notify the user
-        println!("Please manually close the iTerm2 tabs for '{}-{}'", project_name, branch_prefix);
+        TerminalMode::Iterm2 => {
+            // For iTerm2, we can't programmatically close tabs, just notify the user
+            println!("Please manually close the iTerm2 tabs for '{}-{}'", project_name, branch_prefix);
+        }
     }
 
     // Remove worktrees for each AI app

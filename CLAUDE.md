@@ -42,19 +42,23 @@ cargo build --release # Release build for production use
 
 ```bash
 # From a directory with the required config files:
-cargo run -- add <branch-prefix>             # Create worktrees and session
-cargo run -- add <branch-prefix> --tmux      # Use tmux instead of iTerm2
-cargo run -- remove <branch-prefix>          # Remove worktrees and session
-cargo run -- remove <branch-prefix> --tmux   # Remove tmux session
+cargo run -- add <branch-prefix>                               # Use system default (iTerm2 on macOS, tmux-single-window on Linux)
+cargo run -- add <branch-prefix> --mode iterm2                 # Use iTerm2 (macOS only)
+cargo run -- add <branch-prefix> --mode tmux-multi-window      # Use tmux with separate windows per AI app
+cargo run -- add <branch-prefix> --mode tmux-single-window     # Use tmux with all apps in one window
+cargo run -- remove <branch-prefix>                            # Remove worktrees and session
+cargo run -- remove <branch-prefix> --mode tmux-single-window  # Specify mode for removal
 
 # Or using the binary:
-mai add <branch-prefix>                      # Create worktrees and session
-mai add <branch-prefix> --tmux               # Use tmux instead of iTerm2
-mai remove <branch-prefix>                   # Remove worktrees and session
-mai remove <branch-prefix> --tmux            # Remove tmux session
+mai add <branch-prefix>                          # Use system default or config file setting
+mai add <branch-prefix> --mode iterm2            # iTerm2 mode (macOS only)
+mai add <branch-prefix> --mode tmux-multi-window # Tmux: one window per AI app
+mai add <branch-prefix> --mode tmux-single-window# Tmux: all apps in one window (columns)
+mai remove <branch-prefix>                       # Remove worktrees and session
+mai remove <branch-prefix> --mode tmux-multi-window # Specify mode for removal
 
 # Initialize a new config file:
-mai init                                      # Interactive setup of multi-ai-config.jsonc
+mai init                                         # Interactive setup of multi-ai-config.jsonc
 ```
 
 ### Test
@@ -80,6 +84,9 @@ cargo fmt      # Format code according to Rust standards
 2. **config.rs**: Manages project configuration:
    - `ProjectConfig`: Reads from current directory's `multi-ai-config.jsonc` for AI apps list
    - `AiApp` struct: Defines AI tool name and full command to execute
+   - `TerminalMode` enum (v0.11.0+): Defines terminal mode (Iterm2, TmuxMultiWindow, TmuxSingleWindow)
+     - System defaults: macOS → Iterm2, Linux → TmuxSingleWindow
+     - Priority: CLI flag > config file > system default
 
 3. **worktree.rs**: `WorktreeManager` interfaces with gwt CLI to:
    - Create git worktrees for each AI app with naming pattern: `<branch-prefix>-<ai-app>`
@@ -96,10 +103,16 @@ cargo fmt      # Format code according to Rust standards
 
 5. **tmux.rs**: `TmuxManager` handles tmux automation (with --tmux flag):
    - Creates session named `<project>-<branch-prefix>`
-   - Creates one window per AI app, each split into two panes
-   - Left pane (index 1): Launches the AI tool after shell initialization (500ms delay)
-   - Right pane (index 2): Shell for manual commands
-   - Important: Pane indices start from 1, not 0
+   - Two layout modes (v0.11.0+):
+     - **Multi-Window** (default): One window per AI app, each split into two panes
+       - Left pane (index 1): Launches the AI tool after shell initialization (500ms delay)
+       - Right pane (index 2): Shell for manual commands
+       - Important: Pane indices start from 1, not 0
+     - **Single-Window**: All AI apps in one window with vertical columns (like iTerm2)
+       - Creates vertical splits for each AI app (columns)
+       - Each column split horizontally into two panes
+       - Top pane: Launches the AI tool
+       - Bottom pane: Shell for manual commands
 
 6. **error.rs**: Custom error types using thiserror for structured error handling
 
@@ -107,6 +120,12 @@ cargo fmt      # Format code according to Rust standards
 
 - **Current Directory Usage** (v0.9.0+): Commands must be run from directory containing config files
 - **Required Files**: Both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` must exist in current directory
+- **Terminal Mode Selection** (v0.11.0+):
+  - Configurable via `terminal_mode` field in `multi-ai-config.jsonc` (optional)
+  - Valid values: `"iterm2"`, `"tmux-multi-window"`, `"tmux-single-window"`
+  - Priority: `--mode` CLI flag > config file > system default
+  - System defaults: macOS → iterm2, Linux → tmux-single-window
+  - iTerm2 mode validates platform (macOS only)
 - **Tmux Pane Targeting**: After splitting, panes are indexed 1 (left) and 2 (right). The code sends commands to `.1` for the left pane
 - **Shell Initialization**: A 500ms delay ensures the shell is ready before sending commands
 - **JSONC Support**: Configuration files use JSONC format (JSON with comments)
