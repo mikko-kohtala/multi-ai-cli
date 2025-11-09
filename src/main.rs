@@ -374,7 +374,7 @@ fn remove_command(
         let branch_name = format!("{}-{}", branch_prefix, ai_app.as_str());
         println!("    • {}", branch_name);
     }
-    // Determine mode for cleanup
+    // Determine mode for cleanup (optional)
     let mut mode = mode_override.map(Into::into);
     if mode.is_none() && cli_tmux {
         mode = Some(Mode::TmuxMultiWindow);
@@ -382,17 +382,20 @@ fn remove_command(
     if mode.is_none() {
         mode = project_config.mode.clone();
     }
-    let mode = mode.ok_or_else(|| {
-        MultiAiError::Config(
-            "No terminal mode configured. Add \"mode\" to multi-ai-config.jsonc or pass --mode/--tmux."
-                .to_string(),
-        )
-    })?;
 
-    if matches!(mode, Mode::TmuxMultiWindow | Mode::TmuxSingleWindow) {
-        println!("  - Tmux session: {}-{}", project_name, branch_prefix);
-    } else {
-        println!("  - Note: iTerm2 tabs must be closed manually");
+    match mode {
+        Some(Mode::TmuxMultiWindow) | Some(Mode::TmuxSingleWindow) => {
+            println!("  - Tmux session: {}-{}", project_name, branch_prefix);
+        }
+        Some(Mode::Iterm2) => {
+            println!("  - Note: iTerm2 tabs must be closed manually");
+        }
+        None => {
+            println!(
+                "  - Will attempt to remove tmux session '{}' if present; iTerm2 tabs must be closed manually",
+                format!("{}-{}", project_name, branch_prefix)
+            );
+        }
     }
     println!();
 
@@ -405,24 +408,20 @@ fn remove_command(
         println!("Forcing removal without confirmation (--force).");
     }
 
-    if matches!(mode, Mode::TmuxMultiWindow | Mode::TmuxSingleWindow) {
-        // Kill tmux session
-        let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
-        println!(
-            "Removing tmux session '{}-{}'...",
-            project_name, branch_prefix
-        );
-        match tmux_manager.kill_session() {
-            Ok(_) => println!("  ✓ Tmux session removed"),
-            Err(e) => eprintln!("  ⚠ Failed to remove tmux session: {}", e),
-        }
-    } else {
-        // For iTerm2, we can't programmatically close tabs, just notify the user
-        println!(
-            "Please manually close the iTerm2 tabs for '{}-{}'",
-            project_name, branch_prefix
-        );
+    // Best-effort: try to kill tmux session regardless of configured mode.
+    // If tmux isn't installed or the session doesn't exist, this will no-op or warn.
+    let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
+    println!("Removing tmux session '{}-{}' (if present)...", project_name, branch_prefix);
+    match tmux_manager.kill_session() {
+        Ok(_) => println!("  ✓ Tmux session removed or not present"),
+        Err(e) => eprintln!("  ⚠ Tmux cleanup skipped: {}", e),
     }
+
+    // For iTerm2, we can't programmatically close tabs, just notify the user
+    println!(
+        "Note: If you previously used iTerm2 mode, please close the iTerm2 tabs for '{}-{}' manually.",
+        project_name, branch_prefix
+    );
 
     // Remove worktrees for each AI app
     for ai_app in &project_config.ai_apps {
