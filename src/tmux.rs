@@ -116,8 +116,9 @@ impl TmuxManager {
 
         // Now split each column vertically to add a shell pane below the AI pane
         // After the horizontal splits above, we have panes 1, 2, 3, ... (left to right)
-        // NOTE: tmux uses 1-based indexing!
-        for (col_idx, (ai_app, worktree_path)) in worktree_paths.iter().enumerate() {
+        // NOTE: We split in REVERSE order (right to left) to avoid pane number shifts
+        // When we split a pane, all panes to the right get their numbers incremented
+        for (col_idx, (_ai_app, worktree_path)) in worktree_paths.iter().enumerate().rev() {
             let pane_num = col_idx + 1;  // Convert 0-based index to 1-based pane number
 
             // Split this column vertically (top-bottom)
@@ -136,15 +137,15 @@ impl TmuxManager {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(MultiAiError::Tmux(format!("Failed to split column {}: {}", pane_num, stderr)));
             }
+        }
 
-            // After splitting vertically, the pane numbering changes:
-            // If we had panes [1, 2, 3] and split pane 1, we now have [1(top), 2(bottom), 3, 4]
-            // After splitting pane 3 (which was originally pane 2), we have [1, 2, 3(top), 4(bottom), 5]
-            // The top pane for each column is at: (col_idx * 2) + 1
-
+        // Now send commands to each AI pane
+        // After all vertical splits, the panes are numbered:
+        // [1(top-col0), 2(bottom-col0), 3(top-col1), 4(bottom-col1), ...]
+        for (col_idx, (ai_app, worktree_path)) in worktree_paths.iter().enumerate() {
             thread::sleep(Duration::from_millis(500));
 
-            // Send the AI command to the top pane of this column
+            // The top pane for each column is at: (col_idx * 2) + 1
             let top_pane_idx = (col_idx * 2) + 1;
             let launch_command = format!("cd {} && {}", worktree_path, ai_app.command());
             let output = Command::new("tmux")
@@ -176,11 +177,18 @@ impl TmuxManager {
     }
 
     fn calculate_split_percentage(&self, current_idx: usize, total: usize) -> usize {
-        // Calculate the percentage for the new pane in a split
-        // This ensures equal distribution of space
-        // When we split pane 0, the new pane should take up 1/remaining of the current pane's space
-        let remaining_panes = total - current_idx;
-        100 / remaining_panes
+        // Calculate the percentage for equal-width columns
+        // When creating N columns by splitting pane 1 repeatedly:
+        // - Split K (0-indexed): new pane gets (K+1)/(K+2) of pane 1's width
+        // - This ensures all columns end up with equal width (100/N each)
+        //
+        // Since we iterate in reverse, col_idx maps to split number:
+        // - split_num = N - col_idx - 1
+        // - percentage = 100 * (split_num + 1) / (split_num + 2)
+        //              = 100 * (N - col_idx) / (N - col_idx + 1)
+        let numerator = total - current_idx;
+        let denominator = total - current_idx + 1;
+        (100 * numerator) / denominator
     }
 
     fn create_initial_window(&self, ai_app: &AiApp, worktree_path: &str) -> Result<()> {
