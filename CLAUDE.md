@@ -79,7 +79,7 @@ cargo fmt      # Format code according to Rust standards
    - Validates presence of both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` in current directory
 2. **config.rs**: Manages project configuration:
    - `ProjectConfig`: Reads `multi-ai-config.jsonc` for AI apps list and `mode`
-   - `Mode`: enum for `iterm2`, `tmux-single-window`, `tmux-multi-window` (required)
+   - `Mode`: enum for `iterm2`, `tmux-single-window`, `tmux-multi-window` (optional; defaults: macOS → iterm2, others → tmux-single-window)
    - `TmuxLayout`: internal enum used by tmux adapter (`SingleWindow`, `MultiWindow`)
    - `AiApp` struct: Defines AI tool name and full command to execute
 
@@ -100,7 +100,7 @@ cargo fmt      # Format code according to Rust standards
    - Creates session named `<project>-<branch-prefix>`
    - Supports two layouts:
      - `tmux-multi-window`: one window per AI app, each split into two panes (left: AI, right: shell)
-     - `tmux-single-window`: single window `apps` with columns per app, each column split into two panes (top: AI, bottom: shell)
+     - `tmux-single-window`: single window `apps` with equal-width columns per app, each column split into two panes (top: AI, bottom: shell)
    - Launch pane: original pane per app (left for multi_window, top for single_window) runs the AI tool (500ms delay before sending)
    - Pane targeting uses `#{pane_id}` captured pre-split to avoid index assumptions
 
@@ -110,7 +110,8 @@ cargo fmt      # Format code according to Rust standards
 
 - **Current Directory Usage** (v0.9.0+): Commands must be run from directory containing config files
 - **Required Files**: Both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` must exist in current directory
-- **Tmux Pane Targeting**: Capture `#{pane_id}` of the original pane before splitting and target by ID. This works regardless of `base-index`/`pane-base-index`
+- **Tmux Pane Targeting**: Capture `#{pane_id}` of the original pane before splitting and target by ID. This works regardless of `base-index`/`pane-base-index`.
+- **Mode Defaults by OS**: If not specified via CLI or config, defaults to iTerm2 on macOS and tmux single-window elsewhere.
 - **Shell Initialization**: A 500ms delay ensures the shell is ready before sending commands
 - **JSONC Support**: Configuration files use JSONC format (JSON with comments)
 
@@ -119,9 +120,6 @@ cargo fmt      # Format code according to Rust standards
 - Key crates: clap (CLI), serde (serialization), jsonc-parser (JSONC support), thiserror (errors)
 
 ## Known Issues & Fixes
-
-### Tmux Pane Index Issue
-Fixed in commit: Tmux panes start indexing from 1, not 0. Commands should target `.1` for the first pane.
 
 ### Shell Initialization Timing
 Fixed by adding 500ms delay after pane creation to ensure shell is ready before sending commands.

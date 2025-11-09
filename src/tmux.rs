@@ -345,16 +345,29 @@ impl TmuxManager {
             )));
         }
 
-        // Capture the initial pane id (first column)
+        // Capture the initial pane id (leftmost/first column)
         let mut column_panes: Vec<String> = Vec::with_capacity(worktree_paths.len());
-        let first_pane = self.current_pane_id_in_window(window_name)?;
-        column_panes.push(first_pane.clone());
-        let mut last_col_pane = first_pane;
+        let leftmost_pane = self.current_pane_id_in_window(window_name)?;
+        column_panes.push(leftmost_pane.clone());
 
-        // Create additional columns (one per remaining app)
-        for (_i, (_app, path)) in worktree_paths.iter().enumerate().skip(1) {
+        // Create additional columns (one per remaining app) by repeatedly splitting the
+        // leftmost pane with carefully chosen percentages to produce equal-width columns.
+        // This approach yields N equal columns without relying on tmux layout heuristics.
+        for (idx, (_app, path)) in worktree_paths.iter().enumerate().skip(1) {
+            let total = worktree_paths.len();
+            let percentage = self.calculate_split_percentage(idx, total);
+
             let output = Command::new("tmux")
-                .args(["split-window", "-h", "-t", &last_col_pane, "-c", path])
+                .args([
+                    "split-window",
+                    "-h",
+                    "-t",
+                    &leftmost_pane,
+                    "-c",
+                    path,
+                    "-p",
+                    &percentage.to_string(),
+                ])
                 .output()
                 .map_err(|e| {
                     MultiAiError::CommandFailed(format!("Failed to split column: {}", e))
@@ -367,10 +380,9 @@ impl TmuxManager {
                 )));
             }
 
-            // The new pane becomes active; capture its id
+            // The new pane becomes active; capture its id as the top pane for this column
             let new_pane = self.current_pane_id_in_window(window_name)?;
-            column_panes.push(new_pane.clone());
-            last_col_pane = new_pane;
+            column_panes.push(new_pane);
         }
 
         // For each column, split vertically to create shell pane and launch AI in the top pane
@@ -409,5 +421,14 @@ impl TmuxManager {
         }
 
         Ok(())
+    }
+
+    // Calculate the percentage for equal-width columns when repeatedly splitting the leftmost pane.
+    // For total=N columns, on the k-th split (current_idx = k, starting at 1), the leftmost pane
+    // currently has width (N - k + 1)/N of the whole window. To create a new column of width 1/N
+    // total, the new pane must take a fraction 1/(N - k + 1) of the leftmost pane.
+    fn calculate_split_percentage(&self, current_idx: usize, total: usize) -> usize {
+        let remaining = total - current_idx + 1; // remaining columns including the leftmost
+        100 / remaining
     }
 }

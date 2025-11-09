@@ -130,6 +130,18 @@ fn main() -> Result<()> {
     }
 }
 
+#[inline]
+fn system_default_mode() -> Mode {
+    #[cfg(target_os = "macos")]
+    {
+        Mode::Iterm2
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Mode::TmuxSingleWindow
+    }
+}
+
 fn create_command(
     branch_prefix: String,
     cli_tmux: bool,
@@ -249,7 +261,7 @@ fn create_command(
 
     println!("✓ All worktrees created successfully!");
 
-    // Determine mode: --mode takes precedence, --tmux is legacy shorthand for tmux-multi-window
+    // Determine mode: CLI override > legacy --tmux > config file > system default
     let mut mode = mode_override.map(Into::into);
     if mode.is_none() && cli_tmux {
         mode = Some(Mode::TmuxMultiWindow);
@@ -257,7 +269,7 @@ fn create_command(
     if mode.is_none() {
         mode = project_config.mode.clone();
     }
-    let mode = mode.unwrap_or(Mode::TmuxMultiWindow);
+    let mode = mode.unwrap_or_else(system_default_mode);
 
     match mode {
         Mode::Iterm2 => {

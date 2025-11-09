@@ -59,7 +59,7 @@ Or create it manually:
 ```jsonc
 {
   "terminals_per_column": 2,  // Number of terminal panes per column (first is AI command, rest are shells)
-  "mode": "iterm2",           // Required: iterm2 | tmux-single-window | tmux-multi-window
+  "mode": "iterm2",           // Optional: iterm2 | tmux-single-window | tmux-multi-window (defaults: macOS→iterm2, others→tmux-single-window)
   "ai_apps": [
     {
       "name": "claude",
@@ -92,7 +92,7 @@ Or create it manually:
 ### Configuration Fields
 
 - `terminals_per_column` (optional): Number of terminal panes per column (default: 2). The first pane runs the AI command, additional panes are shell terminals
-- `mode` (required): One of `"iterm2"`, `"tmux-single-window"`, `"tmux-multi-window"`. On Linux, `iterm2` is unavailable. Use the CLI flag `--mode` (or legacy `--tmux`) for one-off overrides.
+- `mode` (optional): One of `"iterm2"`, `"tmux-single-window"`, `"tmux-multi-window"`. Defaults by OS: macOS → `iterm2`; others → `tmux-single-window`. Use CLI `--mode` (or legacy `--tmux`) to override per run.
 - `ai_apps`: Array of AI applications to configure
   - `name`: The name of the AI tool (used for branch naming)
   - `command`: The full command to launch the AI tool with any flags
@@ -138,7 +138,7 @@ mai remove feature-branch --force   # removes without prompting
 
 ## Terminal Layout
 
-### iTerm2 Mode (Default)
+### iTerm2 Mode (Default on macOS)
 - Creates a single tab with all AI applications
 - Column-based layout: each AI app gets a vertical column with 2 panes
   - 1 app: 1x2 layout (1 column, 2 rows)
@@ -152,7 +152,7 @@ mai remove feature-branch --force   # removes without prompting
 - Creates a single tmux session named `<project>-<branch-prefix>`
 - Two layouts are supported (selected via `mode`):
   - `tmux-multi-window`: One window per AI application (two panes: left runs AI, right is a shell)
-  - `tmux-single-window`: Single window named `apps` with N columns (one per app); each column splits into two panes (top runs AI, bottom is a shell)
+  - `tmux-single-window`: Single window named `apps` with N equal-width columns (one per app); each column splits into two panes (top runs AI, bottom is a shell)
 
 ## Example Workflow
 
