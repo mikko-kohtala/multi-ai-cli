@@ -1,6 +1,7 @@
 {
 	// Example configuration for multi-ai CLI
 	"terminals_per_column": 2,  // Number of terminal panes per column (first is AI command, rest are shells)
+	"mode": "iterm2",           // Required: iterm2 | tmux-single-window | tmux-multi-window
 	"ai_apps": [
 		{
 			"name": "claude",

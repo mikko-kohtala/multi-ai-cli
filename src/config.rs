@@ -5,10 +5,26 @@ pub struct ProjectConfig {
     pub ai_apps: Vec<AiApp>,
     #[serde(default = "default_terminals_per_column")]
     pub terminals_per_column: usize,
+    pub mode: Mode,
 }
 
 fn default_terminals_per_column() -> usize {
     2
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TmuxLayout {
+    MultiWindow,
+    SingleWindow,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Mode {
+    Iterm2,
+    TmuxSingleWindow,
+    TmuxMultiWindow,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

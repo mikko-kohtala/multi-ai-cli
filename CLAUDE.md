@@ -78,7 +78,9 @@ cargo fmt      # Format code according to Rust standards
    - As of v0.9.0: Commands work from current directory, no project path argument needed
    - Validates presence of both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` in current directory
 2. **config.rs**: Manages project configuration:
-   - `ProjectConfig`: Reads from current directory's `multi-ai-config.jsonc` for AI apps list
+   - `ProjectConfig`: Reads `multi-ai-config.jsonc` for AI apps list and `mode`
+   - `Mode`: enum for `iterm2`, `tmux-single-window`, `tmux-multi-window` (required)
+   - `TmuxLayout`: internal enum used by tmux adapter (`SingleWindow`, `MultiWindow`)
    - `AiApp` struct: Defines AI tool name and full command to execute
 
 3. **worktree.rs**: `WorktreeManager` interfaces with gwt CLI to:
@@ -94,12 +96,13 @@ cargo fmt      # Format code according to Rust standards
    - Top pane launches the AI tool with custom command
    - Bottom pane provides shell in worktree directory
 
-5. **tmux.rs**: `TmuxManager` handles tmux automation (with --tmux flag):
+5. **tmux.rs**: `TmuxManager` handles tmux automation (with --tmux flag or config):
    - Creates session named `<project>-<branch-prefix>`
-   - Creates one window per AI app, each split into two panes
-   - Left pane (index 1): Launches the AI tool after shell initialization (500ms delay)
-   - Right pane (index 2): Shell for manual commands
-   - Important: Pane indices start from 1, not 0
+   - Supports two layouts:
+     - `tmux-multi-window`: one window per AI app, each split into two panes (left: AI, right: shell)
+     - `tmux-single-window`: single window `apps` with columns per app, each column split into two panes (top: AI, bottom: shell)
+   - Launch pane: original pane per app (left for multi_window, top for single_window) runs the AI tool (500ms delay before sending)
+   - Pane targeting uses `#{pane_id}` captured pre-split to avoid index assumptions
 
 6. **error.rs**: Custom error types using thiserror for structured error handling
 
@@ -107,7 +110,7 @@ cargo fmt      # Format code according to Rust standards
 
 - **Current Directory Usage** (v0.9.0+): Commands must be run from directory containing config files
 - **Required Files**: Both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` must exist in current directory
-- **Tmux Pane Targeting**: After splitting, panes are indexed 1 (left) and 2 (right). The code sends commands to `.1` for the left pane
+- **Tmux Pane Targeting**: Capture `#{pane_id}` of the original pane before splitting and target by ID. This works regardless of `base-index`/`pane-base-index`
 - **Shell Initialization**: A 500ms delay ensures the shell is ready before sending commands
 - **JSONC Support**: Configuration files use JSONC format (JSON with comments)
 
