@@ -1,0 +1,11 @@
+{
+  "repositoryUrl": "git@github.com:mikko-kohtala/multi-ai-cli.git",
+  "mainBranch": "main",
+  "createdAt": "2025-11-09T05:27:01.612423328Z",
+  "sourceControl": "github",
+  "hooks": {
+    "postAdd": [],
+    "preRemove": [],
+    "postRemove": []
+  }
+}
