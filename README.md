@@ -43,9 +43,15 @@ cargo build --release
 
 ### Required Files
 
-As of v0.9.0, the following files must exist in your project directory:
+The following files must exist in your project directory:
 1. `multi-ai-config.jsonc` - Defines AI applications and their commands
 2. `git-worktree-config.jsonc` - Git worktree configuration (created by `gwt init`)
+
+**Config File Locations**: Config files can be placed in either:
+- Current directory (checked first)
+- `./main/` subdirectory (checked second if not found in current directory)
+
+This allows you to keep config files version-controlled in a `./main/` subdirectory while maintaining worktrees at the repo root level.
 
 ### Setting up multi-ai-config.jsonc
 
@@ -99,7 +105,7 @@ Or create it manually:
 
 ## Usage
 
-**Important**: As of v0.9.0, `mai add` and `mai remove` commands must be run from a directory containing both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` files.
+**Important**: `mai add`, `mai continue`, `mai resume`, and `mai remove` commands must be run from a directory containing both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` files (either in the current directory or in a `./main/` subdirectory).
 
 ### Create worktrees and terminal sessions
 
@@ -123,6 +129,25 @@ This will:
 3. Each tab/window has two panes:
    - Top pane: Runs the AI tool with specified command
    - Bottom pane: Shell in the worktree directory for manual commands
+
+### Continue working on existing worktrees
+
+If you've closed your terminal session but the worktrees still exist, you can create a new session/tab:
+
+```bash
+# From your project directory:
+cd ~/code/my-project
+mai continue feature-branch   # Creates new session/tab for existing worktrees
+# Or use the alias:
+mai resume feature-branch
+```
+
+This will:
+1. Check that worktrees for the branch prefix already exist
+2. Create a new iTerm2 tab (or tmux session) pointing to the existing worktrees
+3. Each tab/window will have the same layout as `add` command
+
+**Note**: If worktrees don't exist, you'll get an error asking you to run `mai add` first.
 
 ### Remove worktrees and cleanup
 
@@ -191,7 +216,13 @@ mai add new-feature
 
 4. Work on your feature across multiple AI tools
 
-5. Clean up when done:
+5. If you close your terminal but want to continue later:
+```bash
+cd ~/code/my-project
+mai continue new-feature  # or: mai resume new-feature
+```
+
+6. Clean up when done:
 ```bash
 cd ~/code/my-project
 mai remove new-feature

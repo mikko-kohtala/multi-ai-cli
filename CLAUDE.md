@@ -38,7 +38,12 @@ cargo build --release # Release build for production use
 ```
 
 ### Run
-**IMPORTANT**: As of v0.9.0, `mai add` and `mai remove` must be run from a directory containing both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` files.
+
+**Config File Locations**: Config files can be placed in either:
+- Current directory (checked first)
+- `./main/` subdirectory (checked second if not found in current directory)
+
+This allows you to keep config files version-controlled in a `./main/` subdirectory while maintaining worktrees at the repo root level.
 
 ```bash
 # From a directory with the required config files:
@@ -46,12 +51,16 @@ cargo run -- add <branch-prefix>             # Create worktrees and session
 cargo run -- add <branch-prefix> --tmux      # Use tmux instead of iTerm2
 cargo run -- remove <branch-prefix>          # Remove worktrees and session
 cargo run -- remove <branch-prefix> --tmux   # Remove tmux session
+cargo run -- continue <branch-prefix>        # Create new session/tab for existing worktrees
+cargo run -- resume <branch-prefix>          # Alias for continue
 
 # Or using the binary:
 mai add <branch-prefix>                      # Create worktrees and session
 mai add <branch-prefix> --tmux               # Use tmux instead of iTerm2
 mai remove <branch-prefix>                   # Remove worktrees and session
 mai remove <branch-prefix> --tmux            # Remove tmux session
+mai continue <branch-prefix>                 # Create new session/tab for existing worktrees
+mai resume <branch-prefix>                   # Alias for continue
 
 # Initialize a new config file:
 mai init                                      # Interactive setup of multi-ai-config.jsonc
@@ -75,8 +84,8 @@ cargo fmt      # Format code according to Rust standards
 
 ### Core Flow
 1. **main.rs**: Entry point, handles CLI argument parsing via clap, orchestrates the add/remove commands
-   - As of v0.9.0: Commands work from current directory, no project path argument needed
-   - Validates presence of both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` in current directory
+   - Commands work from current directory, no project path argument needed
+   - Validates presence of both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` in current directory or `./main/` subdirectory
 2. **config.rs**: Manages project configuration:
    - `ProjectConfig`: Reads `multi-ai-config.jsonc` for AI apps list and `mode`
    - `Mode`: enum for `iterm2`, `tmux-single-window`, `tmux-multi-window` (optional; defaults: macOS → iterm2, others → tmux-single-window)
@@ -108,8 +117,13 @@ cargo fmt      # Format code according to Rust standards
 
 ### Key Implementation Details
 
-- **Current Directory Usage** (v0.9.0+): Commands must be run from directory containing config files
-- **Required Files**: Both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` must exist in current directory
+- **Current Directory Usage**: Commands must be run from directory containing config files
+- **Required Files**: Both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` must exist (current directory or `./main/` subdirectory)
+- **Config File Search**: Config files are searched in two locations:
+  1. Current directory (checked first)
+  2. `./main/` subdirectory (checked if not found in current directory)
+  - This allows keeping configs in git while maintaining worktrees at repo root
+  - `project_path` always remains the current directory (repo root), regardless of config location
 - **Tmux Pane Targeting**: Capture `#{pane_id}` of the original pane before splitting and target by ID. This works regardless of `base-index`/`pane-base-index`.
 - **Mode Defaults by OS**: If not specified via CLI or config, defaults to iTerm2 on macOS and tmux single-window elsewhere.
 - **Shell Initialization**: A 500ms delay ensures the shell is ready before sending commands

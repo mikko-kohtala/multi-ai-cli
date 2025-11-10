@@ -13,7 +13,7 @@ use error::{MultiAiError, Result};
 use iterm2::ITerm2Manager;
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tmux::TmuxManager;
@@ -85,6 +85,46 @@ enum Command {
         )]
         force: bool,
     },
+
+    #[command(about = "Continue working on existing worktrees (creates new session/tab)")]
+    Continue {
+        #[arg(help = "Branch prefix for the existing worktrees")]
+        branch_prefix: String,
+
+        #[arg(
+            long,
+            help = "Use tmux multi-window layout (legacy flag)",
+            conflicts_with = "mode"
+        )]
+        tmux: bool,
+
+        #[arg(
+            long,
+            value_enum,
+            help = "Override configured mode (iterm2, tmux-single-window, tmux-multi-window)"
+        )]
+        mode: Option<ModeOverride>,
+    },
+
+    #[command(about = "Resume working on existing worktrees (alias for continue)")]
+    Resume {
+        #[arg(help = "Branch prefix for the existing worktrees")]
+        branch_prefix: String,
+
+        #[arg(
+            long,
+            help = "Use tmux multi-window layout (legacy flag)",
+            conflicts_with = "mode"
+        )]
+        tmux: bool,
+
+        #[arg(
+            long,
+            value_enum,
+            help = "Override configured mode (iterm2, tmux-single-window, tmux-multi-window)"
+        )]
+        mode: Option<ModeOverride>,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -122,6 +162,16 @@ fn main() -> Result<()> {
             mode,
             force,
         }) => remove_command(branch_prefix, tmux, mode, force),
+        Some(Command::Continue {
+            branch_prefix,
+            tmux,
+            mode,
+        }) => continue_command(branch_prefix, tmux, mode),
+        Some(Command::Resume {
+            branch_prefix,
+            tmux,
+            mode,
+        }) => continue_command(branch_prefix, tmux, mode),
         None => {
             eprintln!("Error: Command required. Use 'mai add <branch-prefix>' or 'mai remove <branch-prefix>'");
             eprintln!("Run 'mai --help' for more information.");
@@ -142,6 +192,23 @@ fn system_default_mode() -> Mode {
     }
 }
 
+/// Find a config file by checking current directory first, then ./main/ subdirectory
+fn find_config_file(base_path: &Path, filename: &str) -> Option<PathBuf> {
+    // First check current directory
+    let current_path = base_path.join(filename);
+    if current_path.exists() {
+        return Some(current_path);
+    }
+
+    // Then check ./main/ subdirectory
+    let main_path = base_path.join("main").join(filename);
+    if main_path.exists() {
+        return Some(main_path);
+    }
+
+    None
+}
+
 fn create_command(
     branch_prefix: String,
     cli_tmux: bool,
@@ -150,21 +217,17 @@ fn create_command(
     let project_path = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
-    // Check for multi-ai-config.jsonc in current directory
-    let config_path = project_path.join("multi-ai-config.jsonc");
-    if !config_path.exists() {
-        return Err(MultiAiError::Config(
-            "multi-ai-config.jsonc not found in current directory. Please run 'mai add' from a directory containing this file.".to_string()
-        ));
-    }
+    // Check for multi-ai-config.jsonc (current directory or ./main/ subdirectory)
+    let _config_path = find_config_file(&project_path, "multi-ai-config.jsonc")
+        .ok_or_else(|| MultiAiError::Config(
+            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please run 'mai add' from a directory containing this file.".to_string()
+        ))?;
 
-    // Check for git-worktree-config.jsonc in current directory
-    let gwt_config_path = project_path.join("git-worktree-config.jsonc");
-    if !gwt_config_path.exists() {
-        return Err(MultiAiError::Config(
-            "git-worktree-config.jsonc not found in current directory. Please ensure this file exists.".to_string()
-        ));
-    }
+    // Check for git-worktree-config.jsonc (current directory or ./main/ subdirectory)
+    let _gwt_config_path = find_config_file(&project_path, "git-worktree-config.jsonc")
+        .ok_or_else(|| MultiAiError::Config(
+            "git-worktree-config.jsonc not found in current directory or ./main/ subdirectory. Please ensure this file exists.".to_string()
+        ))?;
 
     let project_name = project_path
         .file_name()
@@ -336,21 +399,17 @@ fn remove_command(
     let project_path = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
-    // Check for multi-ai-config.jsonc in current directory
-    let config_path = project_path.join("multi-ai-config.jsonc");
-    if !config_path.exists() {
-        return Err(MultiAiError::Config(
-            "multi-ai-config.jsonc not found in current directory. Please run 'mai remove' from a directory containing this file.".to_string()
-        ));
-    }
+    // Check for multi-ai-config.jsonc (current directory or ./main/ subdirectory)
+    let _config_path = find_config_file(&project_path, "multi-ai-config.jsonc")
+        .ok_or_else(|| MultiAiError::Config(
+            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please run 'mai remove' from a directory containing this file.".to_string()
+        ))?;
 
-    // Check for git-worktree-config.jsonc in current directory
-    let gwt_config_path = project_path.join("git-worktree-config.jsonc");
-    if !gwt_config_path.exists() {
-        return Err(MultiAiError::Config(
-            "git-worktree-config.jsonc not found in current directory. Please ensure this file exists.".to_string()
-        ));
-    }
+    // Check for git-worktree-config.jsonc (current directory or ./main/ subdirectory)
+    let _gwt_config_path = find_config_file(&project_path, "git-worktree-config.jsonc")
+        .ok_or_else(|| MultiAiError::Config(
+            "git-worktree-config.jsonc not found in current directory or ./main/ subdirectory. Please ensure this file exists.".to_string()
+        ))?;
 
     let project_name = project_path
         .file_name()
@@ -438,16 +497,135 @@ fn remove_command(
     Ok(())
 }
 
-fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
-    // Only look for .jsonc
-    let config_path = project_path.join("multi-ai-config.jsonc");
+fn continue_command(
+    branch_prefix: String,
+    cli_tmux: bool,
+    mode_override: Option<ModeOverride>,
+) -> Result<()> {
+    let project_path = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
-    if !config_path.exists() {
-        return Err(MultiAiError::Config(
-            "multi-ai-config.jsonc not found in current directory. Please create this file first."
-                .to_string(),
-        ));
+    // Check for multi-ai-config.jsonc (current directory or ./main/ subdirectory)
+    let _config_path = find_config_file(&project_path, "multi-ai-config.jsonc")
+        .ok_or_else(|| MultiAiError::Config(
+            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please run 'mai continue' from a directory containing this file.".to_string()
+        ))?;
+
+    // Check for git-worktree-config.jsonc (current directory or ./main/ subdirectory)
+    let _gwt_config_path = find_config_file(&project_path, "git-worktree-config.jsonc")
+        .ok_or_else(|| MultiAiError::Config(
+            "git-worktree-config.jsonc not found in current directory or ./main/ subdirectory. Please ensure this file exists.".to_string()
+        ))?;
+
+    let project_name = project_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
+        .to_string();
+
+    let project_config = load_project_config(&project_path)?;
+    let worktree_manager = WorktreeManager::new(project_path.clone());
+
+    // Check if worktrees exist
+    let ai_app_names: Vec<String> = project_config
+        .ai_apps
+        .iter()
+        .map(|app| app.name.clone())
+        .collect();
+
+    if !worktree_manager.worktrees_exist(&branch_prefix, &ai_app_names) {
+        return Err(MultiAiError::Worktree(format!(
+            "Worktrees for '{}' do not exist. Run 'mai add {}' first.",
+            branch_prefix, branch_prefix
+        )));
     }
+
+    println!("✓ Found existing worktrees for '{}'", branch_prefix);
+
+    // Build worktree paths list (without creating them)
+    let worktree_paths: Vec<(config::AiApp, String)> = project_config
+        .ai_apps
+        .iter()
+        .map(|ai_app| {
+            let branch_name = format!("{}-{}", branch_prefix, ai_app.as_str());
+            let worktree_path = project_path.join(&branch_name);
+            (ai_app.clone(), worktree_path.to_string_lossy().to_string())
+        })
+        .collect();
+
+    // Determine mode: CLI override > legacy --tmux > config file > system default
+    let mut mode = mode_override.map(Into::into);
+    if mode.is_none() && cli_tmux {
+        mode = Some(Mode::TmuxMultiWindow);
+    }
+    if mode.is_none() {
+        mode = project_config.mode.clone();
+    }
+    let mode = mode.unwrap_or_else(system_default_mode);
+
+    match mode {
+        Mode::Iterm2 => {
+            #[cfg(not(target_os = "macos"))]
+            {
+                return Err(MultiAiError::Config(
+                    "iTerm2 mode is only supported on macOS".to_string(),
+                ));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let iterm2_manager = ITerm2Manager::new(
+                    &project_name,
+                    &branch_prefix,
+                    project_config.terminals_per_column,
+                );
+                println!("\nCreating new iTerm2 tab for existing worktrees...");
+                println!(
+                    "  Apps to create tabs for: {:?}",
+                    worktree_paths
+                        .iter()
+                        .map(|(app, _)| app.as_str())
+                        .collect::<Vec<_>>()
+                );
+                println!(
+                    "  Terminals per column: {}",
+                    project_config.terminals_per_column
+                );
+                match iterm2_manager.create_tabs_per_app(&project_config.ai_apps, &worktree_paths) {
+                    Ok(_) => println!("✓ iTerm2 tab created successfully!"),
+                    Err(e) => {
+                        eprintln!("✗ Failed to create iTerm2 tab: {}", e);
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        Mode::TmuxMultiWindow | Mode::TmuxSingleWindow => {
+            let layout = match mode {
+                Mode::TmuxSingleWindow => TmuxLayout::SingleWindow,
+                _ => TmuxLayout::MultiWindow,
+            };
+            let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
+            println!(
+                "\nCreating new tmux session '{}-{}' (layout: {:?})...",
+                project_name, branch_prefix, layout
+            );
+            tmux_manager.create_session(&project_config.ai_apps, &worktree_paths, layout)?;
+            println!("✓ Tmux session created successfully!");
+            println!("\nAttaching to session...");
+            tmux_manager.attach_session()?;
+        }
+    }
+
+    Ok(())
+}
+
+fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
+    // Look for .jsonc in current directory or ./main/ subdirectory
+    let config_path = find_config_file(project_path, "multi-ai-config.jsonc")
+        .ok_or_else(|| MultiAiError::Config(
+            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please create this file first."
+                .to_string(),
+        ))?;
 
     let content = fs::read_to_string(&config_path)
         .map_err(|e| MultiAiError::Config(format!("Failed to read project config: {}", e)))?;

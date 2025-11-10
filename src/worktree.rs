@@ -140,15 +140,27 @@ impl WorktreeManager {
     }
 
     pub fn is_gwt_project(&self) -> bool {
-        // Check if git-worktree-config.jsonc exists (gwt configuration file)
+        // Check if git-worktree-config.jsonc exists in current directory
         let gwt_config_jsonc = self.project_path.join("git-worktree-config.jsonc");
         if gwt_config_jsonc.exists() {
             return true;
         }
 
-        // Also check for .yaml for backward compatibility
+        // Also check in ./main/ subdirectory
+        let gwt_config_jsonc_main = self.project_path.join("main").join("git-worktree-config.jsonc");
+        if gwt_config_jsonc_main.exists() {
+            return true;
+        }
+
+        // Also check for .yaml for backward compatibility (current directory)
         let gwt_config_yaml = self.project_path.join("git-worktree-config.yaml");
         if gwt_config_yaml.exists() {
+            return true;
+        }
+
+        // Also check for .yaml in ./main/ subdirectory
+        let gwt_config_yaml_main = self.project_path.join("main").join("git-worktree-config.yaml");
+        if gwt_config_yaml_main.exists() {
             return true;
         }
 
@@ -159,5 +171,14 @@ impl WorktreeManager {
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)
+    }
+
+    pub fn worktrees_exist(&self, branch_prefix: &str, ai_app_names: &[String]) -> bool {
+        // Check if all worktree directories exist for the given branch prefix and AI apps
+        ai_app_names.iter().all(|app_name| {
+            let branch_name = format!("{}-{}", branch_prefix, app_name);
+            let worktree_path = self.project_path.join(&branch_name);
+            worktree_path.exists() && worktree_path.is_dir()
+        })
     }
 }

@@ -13,7 +13,7 @@ help:
 build:
 	cargo build --release
 
-install:
+install: build
 	cargo install --path .
 
 clean:
