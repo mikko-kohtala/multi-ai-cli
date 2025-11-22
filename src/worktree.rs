@@ -33,10 +33,8 @@ impl WorktreeManager {
         // Stream stdout
         if let Some(stdout) = child.stdout.take() {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    println!("    {}", line);
-                }
+            for line in reader.lines().map_while(|r| r.ok()) {
+                println!("    {}", line);
             }
         }
 
@@ -50,11 +48,9 @@ impl WorktreeManager {
             let mut stderr_msg = String::new();
             if let Some(stderr) = child.stderr.take() {
                 let reader = BufReader::new(stderr);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        stderr_msg.push_str(&line);
-                        stderr_msg.push('\n');
-                    }
+                for line in reader.lines().map_while(|r| r.ok()) {
+                    stderr_msg.push_str(&line);
+                    stderr_msg.push('\n');
                 }
             }
 
@@ -101,10 +97,8 @@ impl WorktreeManager {
         // Stream stdout
         if let Some(stdout) = child.stdout.take() {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    println!("    {}", line);
-                }
+            for line in reader.lines().map_while(|r| r.ok()) {
+                println!("    {}", line);
             }
         }
 
@@ -118,11 +112,9 @@ impl WorktreeManager {
             let mut stderr_msg = String::new();
             if let Some(stderr) = child.stderr.take() {
                 let reader = BufReader::new(stderr);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        stderr_msg.push_str(&line);
-                        stderr_msg.push('\n');
-                    }
+                for line in reader.lines().map_while(|r| r.ok()) {
+                    stderr_msg.push_str(&line);
+                    stderr_msg.push('\n');
                 }
             }
 
@@ -147,7 +139,10 @@ impl WorktreeManager {
         }
 
         // Also check in ./main/ subdirectory
-        let gwt_config_jsonc_main = self.project_path.join("main").join("git-worktree-config.jsonc");
+        let gwt_config_jsonc_main = self
+            .project_path
+            .join("main")
+            .join("git-worktree-config.jsonc");
         if gwt_config_jsonc_main.exists() {
             return true;
         }
@@ -159,7 +154,10 @@ impl WorktreeManager {
         }
 
         // Also check for .yaml in ./main/ subdirectory
-        let gwt_config_yaml_main = self.project_path.join("main").join("git-worktree-config.yaml");
+        let gwt_config_yaml_main = self
+            .project_path
+            .join("main")
+            .join("git-worktree-config.yaml");
         if gwt_config_yaml_main.exists() {
             return true;
         }

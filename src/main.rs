@@ -451,8 +451,8 @@ fn remove_command(
         }
         None => {
             println!(
-                "  - Will attempt to remove tmux session '{}' if present; iTerm2 tabs must be closed manually",
-                format!("{}-{}", project_name, branch_prefix)
+                "  - Will attempt to remove tmux session '{}-{}' if present; iTerm2 tabs must be closed manually",
+                project_name, branch_prefix
             );
         }
     }
@@ -470,7 +470,10 @@ fn remove_command(
     // Best-effort: try to kill tmux session regardless of configured mode.
     // If tmux isn't installed or the session doesn't exist, this will no-op or warn.
     let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
-    println!("Removing tmux session '{}-{}' (if present)...", project_name, branch_prefix);
+    println!(
+        "Removing tmux session '{}-{}' (if present)...",
+        project_name, branch_prefix
+    );
     match tmux_manager.kill_session() {
         Ok(_) => println!("  ✓ Tmux session removed or not present"),
         Err(e) => eprintln!("  ⚠ Tmux cleanup skipped: {}", e),

@@ -6,9 +6,9 @@ help:
 	@echo "  make install - Install the binary using cargo install --path ."
 	@echo "  make clean   - Clean build artifacts"
 	@echo "  make test    - Run tests"
-	@echo "  make check   - Run cargo check"
+	@echo "  make check   - Run all checks (fmt, clippy, test)"
 	@echo "  make fmt     - Format code"
-	@echo "  make clippy  - Run clippy linter"
+	@echo "  make clippy  - Run clippy linter (strict mode)"
 
 build:
 	cargo build --release
@@ -23,10 +23,16 @@ test:
 	cargo test
 
 check:
-	cargo check
+	@echo "→ Checking formatting..."
+	@cargo fmt -- --check
+	@echo "→ Running clippy..."
+	@cargo clippy --all-targets -- -D warnings
+	@echo "→ Running tests..."
+	@cargo test
+	@echo "✓ All checks passed"
 
 fmt:
 	cargo fmt
 
 clippy:
-	cargo clippy
+	cargo clippy --all-targets -- -D warnings
