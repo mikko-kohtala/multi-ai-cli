@@ -11,6 +11,10 @@ The following AI development tools are supported:
 - **amp**: AI assistant (with `--dangerously-allow-all` flag for YOLO mode)
 - **opencode**: AI coding assistant (no special flags for YOLO mode)
 - **cursor-agent**: Cursor AI assistant (with `--force` flag for YOLO mode)
+- **copilot**: GitHub Copilot CLI (interactive mode)
+- **kilo**: Kilo Code CLI (interactive mode)
+- **cline**: Cline CLI (interactive mode)
+- **droid**: Factory CLI (interactive mode)
 
 ## Features
 

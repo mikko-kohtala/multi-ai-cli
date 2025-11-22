@@ -27,6 +27,7 @@ struct CommandVariant {
 #[derive(Debug, Clone)]
 struct AiService {
     name: &'static str,
+    display_name: &'static str,
     variants: &'static [CommandVariant],
 }
 
@@ -34,6 +35,7 @@ impl AiService {
     const SERVICES: &'static [AiService] = &[
         AiService {
             name: "claude",
+            display_name: "Claude Code",
             variants: &[
                 CommandVariant {
                     command: "claude",
@@ -54,6 +56,7 @@ impl AiService {
         },
         AiService {
             name: "gemini",
+            display_name: "Gemini CLI",
             variants: &[
                 CommandVariant {
                     command: "gemini",
@@ -69,6 +72,7 @@ impl AiService {
         },
         AiService {
             name: "codex",
+            display_name: "Codex CLI",
             variants: &[
                 CommandVariant {
                     command: "codex",
@@ -99,6 +103,7 @@ impl AiService {
         },
         AiService {
             name: "amp",
+            display_name: "Amp CLI",
             variants: &[
                 CommandVariant {
                     command: "amp",
@@ -114,6 +119,7 @@ impl AiService {
         },
         AiService {
             name: "opencode",
+            display_name: "OpenCode CLI",
             variants: &[
                 CommandVariant {
                     command: "opencode",
@@ -129,6 +135,7 @@ impl AiService {
         },
         AiService {
             name: "cursor-agent",
+            display_name: "Cursor CLI",
             variants: &[
                 CommandVariant {
                     command: "cursor-agent",
@@ -139,6 +146,50 @@ impl AiService {
                     command: "cursor-agent --force",
                     description: "Force mode - executes without confirmation",
                     is_default: false,
+                },
+            ],
+        },
+        AiService {
+            name: "copilot",
+            display_name: "GitHub Copilot CLI",
+            variants: &[
+                CommandVariant {
+                    command: "copilot",
+                    description: "Standard mode - interactive GitHub Copilot CLI",
+                    is_default: true,
+                },
+            ],
+        },
+        AiService {
+            name: "kilo",
+            display_name: "Kilo Code CLI",
+            variants: &[
+                CommandVariant {
+                    command: "kilo",
+                    description: "Standard mode - Kilo Code CLI interface",
+                    is_default: true,
+                },
+            ],
+        },
+        AiService {
+            name: "cline",
+            display_name: "Cline CLI",
+            variants: &[
+                CommandVariant {
+                    command: "cline",
+                    description: "Standard mode - Cline CLI interface",
+                    is_default: true,
+                },
+            ],
+        },
+        AiService {
+            name: "droid",
+            display_name: "Factory CLI",
+            variants: &[
+                CommandVariant {
+                    command: "droid",
+                    description: "Standard mode - Factory CLI (droid) interface",
+                    is_default: true,
                 },
             ],
         },
@@ -506,7 +557,10 @@ fn render_multiselect(f: &mut Frame, area: Rect, selected: &[bool], focused: usi
         .enumerate()
         .map(|(i, service)| {
             let checkbox = if selected[i] { "[✓]" } else { "[ ]" };
-            let content = format!(" {} {}", checkbox, service.name);
+            let content = format!(
+                " {}  {:<20}  ({})",
+                checkbox, service.display_name, service.name
+            );
             let style = if i == focused {
                 Style::default()
                     .fg(Color::Black)
@@ -530,7 +584,7 @@ fn render_multiselect(f: &mut Frame, area: Rect, selected: &[bool], focused: usi
 
 fn render_command_variant(f: &mut Frame, area: Rect, service_idx: usize, selected: usize) {
     let service = &AiService::SERVICES[service_idx];
-    let title = format!(" Configure {} - Select Command ", service.name);
+    let title = format!(" Configure {} - Select Command ", service.display_name);
 
     let items: Vec<ListItem> = service
         .variants
@@ -636,7 +690,10 @@ fn render_review(f: &mut Frame, area: Rect, wizard: &WizardState) {
         .zip(wizard.service_commands.iter())
     {
         let service = &AiService::SERVICES[*service_idx];
-        lines.push(Line::from(format!("  • {}: {}", service.name, command)));
+        lines.push(Line::from(format!(
+            "  • {}: {}",
+            service.display_name, command
+        )));
     }
 
     lines.push(Line::from(""));
