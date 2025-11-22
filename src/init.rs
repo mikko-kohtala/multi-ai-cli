@@ -558,7 +558,7 @@ fn render_multiselect(f: &mut Frame, area: Rect, selected: &[bool], focused: usi
         .map(|(i, service)| {
             let checkbox = if selected[i] { "[✓]" } else { "[ ]" };
             let content = format!(
-                " {}  {:<20}  ({})",
+                " {}  {:<20}  {}",
                 checkbox, service.display_name, service.name
             );
             let style = if i == focused {
