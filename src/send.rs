@@ -162,7 +162,7 @@ impl SendState {
             sessions,
             session_idx: 0,
             apps,
-            app_idx: 0,
+            app_idx: 0, // 0 = all apps
             send_mode: SendMode::Prompt,
             apply_ultrathink: false,
             clear_after_send: false,
@@ -181,12 +181,24 @@ impl SendState {
         self.sessions.get(self.session_idx).map(|s| s.as_str())
     }
 
-    fn selected_target(&self) -> Option<&ColumnTarget> {
-        self.targets.get(self.app_idx)
+    fn selected_targets(&self) -> Vec<&ColumnTarget> {
+        if self.app_idx == 0 {
+            self.targets.iter().collect()
+        } else {
+            self.targets
+                .get(self.app_idx - 1)
+                .into_iter()
+                .collect::<Vec<_>>()
+        }
     }
 
     fn current_ultrathink(&self) -> Option<&str> {
-        self.apps.get(self.app_idx).and_then(|a| a.ultrathink())
+        if self.app_idx == 0 {
+            // any ultrathink available counts for toggle default
+            self.apps.iter().find_map(|a| a.ultrathink())
+        } else {
+            self.apps.get(self.app_idx - 1).and_then(|a| a.ultrathink())
+        }
     }
 
     fn mode_label(&self) -> &'static str {
@@ -196,6 +208,10 @@ impl SendState {
             Some(Mode::TmuxSingleWindow) => "tmux-single-window",
             None => "auto",
         }
+    }
+
+    fn ultrathink_available(&self) -> bool {
+        matches!(self.send_mode, SendMode::Prompt) && self.current_ultrathink().is_some()
     }
 
     fn refresh_targets(&mut self) -> Result<()> {
@@ -258,8 +274,7 @@ impl SendState {
             self.error = None;
         }
 
-        self.apply_ultrathink =
-            matches!(self.send_mode, SendMode::Prompt) && self.current_ultrathink().is_some();
+        self.apply_ultrathink = self.ultrathink_available();
 
         Ok(())
     }
@@ -300,8 +315,8 @@ impl SendState {
         };
         if self.send_mode == SendMode::Command {
             self.apply_ultrathink = false;
-        } else if self.current_ultrathink().is_some() {
-            self.apply_ultrathink = true;
+        } else {
+            self.apply_ultrathink = self.ultrathink_available();
         }
     }
 
@@ -412,59 +427,82 @@ impl SendState {
     }
 
     fn set_app_idx(&mut self, idx: usize) {
-        if idx < self.apps.len() {
+        if idx <= self.apps.len() {
             self.app_idx = idx;
-            self.apply_ultrathink =
-                matches!(self.send_mode, SendMode::Prompt) && self.current_ultrathink().is_some();
+            self.apply_ultrathink = self.ultrathink_available();
         }
     }
 
     fn send(&mut self) -> Result<()> {
-        let target = self
-            .selected_target()
-            .ok_or_else(|| MultiAiError::Tmux("No target found for selected app".to_string()))?;
+        let targets = self.selected_targets();
+        if targets.is_empty() {
+            return Err(MultiAiError::Tmux(
+                "No target panes found for selection".to_string(),
+            ));
+        }
 
         let session = self
             .selected_session()
             .ok_or_else(|| MultiAiError::Tmux("No tmux session selected".to_string()))?;
-
-        let pane_id = match self.send_mode {
-            SendMode::Prompt => target.top_pane.as_ref().ok_or_else(|| {
-                MultiAiError::Tmux("Top pane not found for selected app".to_string())
-            })?,
-            SendMode::Command => target.command_pane.as_ref().ok_or_else(|| {
-                MultiAiError::Tmux("Command pane (second terminal) not found for app".to_string())
-            })?,
-        };
 
         if self.input.trim().is_empty() {
             self.error = Some("Enter text to send first.".to_string());
             return Ok(());
         }
 
-        let mut payload = self.input.clone();
-        if matches!(self.send_mode, SendMode::Prompt) && self.apply_ultrathink {
-            if let Some(hint) = self.current_ultrathink() {
-                if !payload.ends_with('\n') {
+        let tmux = TmuxManager::from_session_name(session);
+        let mut sent = 0usize;
+        let mut last_target_name = String::new();
+
+        for target in targets {
+            let pane_id = match self.send_mode {
+                SendMode::Prompt => target.top_pane.as_ref().ok_or_else(|| {
+                    MultiAiError::Tmux(format!(
+                        "Top pane not found for selected app '{}'",
+                        target.app.name
+                    ))
+                })?,
+                SendMode::Command => target.command_pane.as_ref().ok_or_else(|| {
+                    MultiAiError::Tmux(format!(
+                        "Command pane (second terminal) not found for app '{}'",
+                        target.app.name
+                    ))
+                })?,
+            };
+
+            let mut payload = self.input.clone();
+            if matches!(self.send_mode, SendMode::Prompt) && self.apply_ultrathink {
+                if let Some(hint) = target.app.ultrathink() {
+                    if !payload.ends_with('\n') {
+                        payload.push('\n');
+                    }
                     payload.push('\n');
+                    payload.push_str(hint);
                 }
-                payload.push('\n');
-                payload.push_str(hint);
             }
+
+            tmux.paste_text_to_pane(pane_id, &payload, true)?;
+            sent += 1;
+            last_target_name = target.app.name.clone();
         }
 
-        let tmux = TmuxManager::from_session_name(session);
-        tmux.paste_text_to_pane(pane_id, &payload, true)?;
+        let mode_label = match self.send_mode {
+            SendMode::Prompt => "prompt",
+            SendMode::Command => "command",
+        };
 
-        self.status = format!(
-            "Sent {} to {} in session {}",
-            match self.send_mode {
-                SendMode::Prompt => "prompt",
-                SendMode::Command => "command",
-            },
-            target.app.name,
-            session
-        );
+        self.status = if self.app_idx == 0 {
+            format!(
+                "Sent {} to all apps ({} targets) in session {}",
+                mode_label, sent, session
+            )
+        } else {
+            format!(
+                "Sent {} to {} in session {}",
+                mode_label, last_target_name, session
+            )
+        };
+
         self.error = None;
 
         if self.clear_after_send {
@@ -573,7 +611,7 @@ fn handle_app_keys(state: &mut SendState, key: KeyEvent) {
             }
         }
         KeyCode::Down => {
-            if state.app_idx + 1 < state.apps.len() {
+            if state.app_idx + 1 <= state.apps.len() {
                 state.set_app_idx(state.app_idx + 1);
             }
         }
@@ -603,7 +641,7 @@ fn handle_option_keys(state: &mut SendState, key: KeyEvent) -> Result<()> {
         KeyCode::BackTab => state.focus_prev(),
         KeyCode::Enter | KeyCode::Char(' ') => match state.option_idx {
             0 => {
-                if state.current_ultrathink().is_some() && state.send_mode == SendMode::Prompt {
+                if state.ultrathink_available() {
                     state.apply_ultrathink = !state.apply_ultrathink;
                 }
             }
@@ -649,7 +687,7 @@ fn handle_mouse(state: &mut SendState, mouse: MouseEvent) -> Result<()> {
     if contains(state.layouts.apps, x, y) {
         let relative = y.saturating_sub(state.layouts.apps.y + 1);
         let idx = relative as usize;
-        if idx < state.apps.len() {
+        if idx <= state.apps.len() {
             state.set_app_idx(idx);
         }
         state.focus = Focus::Apps;
@@ -694,21 +732,26 @@ fn contains(rect: Rect, x: u16, y: u16) -> bool {
 }
 
 fn render(f: &mut Frame, state: &mut SendState) {
-    let main_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(f.area());
 
-    state.layouts.input = main_layout[0];
-    render_input(f, main_layout[0], state);
+    state.layouts.input = vertical[0];
+    render_input(f, vertical[0], state);
 
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(main_layout[1]);
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+        ])
+        .split(vertical[1]);
 
-    render_target_panel(f, right[0], state);
-    render_options_panel(f, right[1], state);
+    render_sessions(f, bottom[0], state);
+    render_apps_and_mode(f, bottom[1], state);
+    render_options_and_status(f, bottom[2], state);
 }
 
 fn render_input(f: &mut Frame, area: Rect, state: &mut SendState) {
@@ -733,19 +776,8 @@ fn render_input(f: &mut Frame, area: Rect, state: &mut SendState) {
     }
 }
 
-fn render_target_panel(f: &mut Frame, area: Rect, state: &mut SendState) {
-    let target_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(6),
-            Constraint::Min(6),
-            Constraint::Length(4),
-        ])
-        .split(area);
-
-    state.layouts.sessions = target_chunks[0];
-    state.layouts.apps = target_chunks[1];
-    state.layouts.mode = target_chunks[2];
+fn render_sessions(f: &mut Frame, area: Rect, state: &mut SendState) {
+    state.layouts.sessions = area;
 
     let session_items: Vec<ListItem> = state
         .sessions
@@ -763,44 +795,43 @@ fn render_target_panel(f: &mut Frame, area: Rect, state: &mut SendState) {
             ListItem::new(format!("{} {}", marker, s)).style(style)
         })
         .collect();
-    let session_block = Block::default().borders(Borders::ALL).title(" Sessions ");
-    f.render_widget(
-        List::new(session_items).block(session_block),
-        target_chunks[0],
-    );
 
-    let app_items: Vec<ListItem> = state
-        .apps
-        .iter()
-        .enumerate()
-        .map(|(i, app)| {
-            let target = state.targets.get(i);
-            let mut label = format!("{} ", app.name);
-            if let Some(t) = target {
-                if t.top_pane.is_none() {
-                    label.push_str("(missing)");
-                }
-            }
+    let block = Block::default().borders(Borders::ALL).title(" Sessions ");
+    f.render_widget(List::new(session_items).block(block), area);
+}
 
-            let style = if i == state.app_idx {
+fn render_apps_and_mode(f: &mut Frame, area: Rect, state: &mut SendState) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(6), Constraint::Length(4)])
+        .split(area);
+
+    state.layouts.apps = chunks[0];
+    state.layouts.mode = chunks[1];
+
+    let app_items: Vec<ListItem> = std::iter::once((0usize, "All apps".to_string()))
+        .chain(
+            state
+                .apps
+                .iter()
+                .enumerate()
+                .map(|(i, app)| (i + 1, app.name.clone())),
+        )
+        .map(|(idx, label)| {
+            let style = if idx == state.app_idx {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
-            } else if target
-                .and_then(|t| if t.top_pane.is_none() { Some(()) } else { None })
-                .is_some()
-            {
-                Style::default().fg(Color::Red)
             } else {
                 Style::default()
             };
-            ListItem::new(label).style(style)
+            ListItem::new(format!("{} ", label)).style(style)
         })
         .collect();
     let app_block = Block::default()
         .borders(Borders::ALL)
         .title(" Target app (column) ");
-    f.render_widget(List::new(app_items).block(app_block), target_chunks[1]);
+    f.render_widget(List::new(app_items).block(app_block), chunks[0]);
 
     let titles = vec!["Prompt", "Command"];
     let mode_block = Tabs::new(
@@ -829,10 +860,10 @@ fn render_target_panel(f: &mut Frame, area: Rect, state: &mut SendState) {
             .add_modifier(Modifier::BOLD),
     );
 
-    f.render_widget(mode_block, target_chunks[2]);
+    f.render_widget(mode_block, chunks[1]);
 }
 
-fn render_options_panel(f: &mut Frame, area: Rect, state: &mut SendState) {
+fn render_options_and_status(f: &mut Frame, area: Rect, state: &mut SendState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -847,15 +878,21 @@ fn render_options_panel(f: &mut Frame, area: Rect, state: &mut SendState) {
     state.layouts.clear = chunks[1];
     state.layouts.send = chunks[2];
 
-    let ultrathink_available =
-        state.send_mode == SendMode::Prompt && state.current_ultrathink().is_some();
+    let ultrathink_available = state.ultrathink_available();
     let ultra_label = if ultrathink_available {
-        let hint = state.current_ultrathink().unwrap_or("");
-        format!(
-            "[{}] Append ultrathink hint ({})",
-            if state.apply_ultrathink { "x" } else { " " },
-            hint
-        )
+        if state.app_idx == 0 {
+            format!(
+                "[{}] Append ultrathink hints (per tool)",
+                if state.apply_ultrathink { "x" } else { " " }
+            )
+        } else {
+            let hint = state.current_ultrathink().unwrap_or("");
+            format!(
+                "[{}] Append ultrathink hint ({})",
+                if state.apply_ultrathink { "x" } else { " " },
+                hint
+            )
+        }
     } else {
         "[ ] Append ultrathink hint (not available)".to_string()
     };
