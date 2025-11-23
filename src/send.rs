@@ -46,6 +46,7 @@ struct TuiState {
     
     focused: FocusedWindow,
     confirm_clear: bool,
+    settings_list_state: ListState,
 }
 
 impl TuiState {
@@ -59,6 +60,9 @@ impl TuiState {
         if !apps.is_empty() {
             app_list_state.select(Some(0));
         }
+        
+        let mut settings_list_state = ListState::default();
+        settings_list_state.select(Some(0));
 
         Self {
             input: String::new(),
@@ -71,17 +75,16 @@ impl TuiState {
             ultrathink: false,
             focused: FocusedWindow::Input,
             confirm_clear: false,
+            settings_list_state,
         }
     }
 
-    fn on_key(&mut self, key: KeyCode, modifiers: KeyModifiers) {
+    fn on_key(&mut self, key: KeyCode, _modifiers: KeyModifiers) {
         match self.focused {
             FocusedWindow::Input => match key {
                 KeyCode::Enter => {
-                    if modifiers.contains(KeyModifiers::SHIFT) {
-                        self.input.insert(self.cursor_position, '\n');
-                        self.cursor_position += 1;
-                    }
+                    self.input.insert(self.cursor_position, '\n');
+                    self.cursor_position += 1;
                 }
                 KeyCode::Char(c) => {
                     if self.cursor_position >= self.input.len() {
@@ -166,13 +169,36 @@ impl TuiState {
                 _ => {}
             },
             FocusedWindow::Settings => match key {
-                KeyCode::Char(' ') | KeyCode::Enter => {
-                     // Toggle target type if 't' or Space/Enter on Target Type
-                     // For simplicity, let's map keys
+                KeyCode::Up => {
+                    if let Some(selected) = self.settings_list_state.selected() {
+                         let new_selected = if selected == 0 {
+                             2 // Loop to last item
+                         } else {
+                             selected - 1
+                         };
+                         self.settings_list_state.select(Some(new_selected));
+                    }
                 }
-                KeyCode::Char('p') => self.target_type = TargetType::Prompt,
-                KeyCode::Char('c') => self.target_type = TargetType::Command,
-                KeyCode::Char('u') => self.ultrathink = !self.ultrathink,
+                KeyCode::Down => {
+                    if let Some(selected) = self.settings_list_state.selected() {
+                        let new_selected = if selected >= 2 {
+                            0 // Loop to first item
+                        } else {
+                            selected + 1
+                        };
+                        self.settings_list_state.select(Some(new_selected));
+                    }
+                }
+                KeyCode::Char(' ') | KeyCode::Enter => {
+                     if let Some(selected) = self.settings_list_state.selected() {
+                         match selected {
+                             0 => self.target_type = TargetType::Prompt,
+                             1 => self.target_type = TargetType::Command,
+                             2 => self.ultrathink = !self.ultrathink,
+                             _ => {}
+                         }
+                     }
+                }
                 KeyCode::Tab => self.focused = FocusedWindow::Input,
                 _ => {}
             }
@@ -339,27 +365,42 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TuiState) -> Resu
 
 fn calculate_layout(area: Rect) -> LayoutRects {
     let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
-        .split(area);
-
-    let left_col = chunks[0];
-    let right_col = chunks[1];
-
-    let right_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(10), // Sessions
-            Constraint::Min(10),    // Apps
-            Constraint::Length(8),  // Settings
+            Constraint::Percentage(60), // Input takes top 60%
+            Constraint::Percentage(40), // Bottom area
         ].as_ref())
-        .split(right_col);
+        .split(area);
+
+    let input_area = chunks[0];
+    let bottom_area = chunks[1];
+
+    // Split bottom area into two columns: Left (Sessions+Apps) and Right (Settings)
+    let bottom_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(50), // Left column
+            Constraint::Percentage(50), // Right column
+        ].as_ref())
+        .split(bottom_area);
+
+    let left_col = bottom_cols[0];
+    let right_col = bottom_cols[1];
+
+    // Split left column into Sessions (top) and Apps (bottom)
+    let left_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(50), // Sessions
+            Constraint::Percentage(50), // Apps
+        ].as_ref())
+        .split(left_col);
 
     LayoutRects {
-        input: left_col,
-        sessions: right_chunks[0],
-        apps: right_chunks[1],
-        settings: right_chunks[2],
+        input: input_area,
+        sessions: left_rows[0],
+        apps: left_rows[1],
+        settings: right_col,
     }
 }
 
@@ -381,10 +422,31 @@ fn ui(f: &mut Frame, state: &mut TuiState) {
             else { Style::default().fg(Color::Yellow) }
         } else { Style::default() });
     
+    // Handle cursor position logic for multiple lines (not implemented in Paragraph directly)
+    // For simplicity, we'll stick with basic rendering but we could add a block cursor character
+    // at the cursor position if we wanted to be fancy, but terminal usually handles it if we set cursor position.
+    
     let input_text = Paragraph::new(state.input.as_str())
         .block(input_block)
         .wrap(Wrap { trim: false });
     f.render_widget(input_text, rects.input);
+    
+    // Set cursor position
+    if state.focused == FocusedWindow::Input {
+        // We need to calculate the screen coordinates of the cursor.
+        // This is tricky with wrapping.
+        // For now, let's assume no wrapping or handle simple cases.
+        // A better way is to let the user rely on the blinking block cursor if we can position it correctly.
+        // But ratatui doesn't easily give us the layout of the text inside the paragraph.
+        
+        // Let's try a simple approach: Count newlines up to cursor_position.
+        let (cursor_x, cursor_y) = calculate_cursor_pos(&state.input, state.cursor_position, rects.input.width - 2); // -2 for borders
+        
+        f.set_cursor_position(Position::new(
+            rects.input.x + 1 + cursor_x,
+            rects.input.y + 1 + cursor_y,
+        ));
+    }
 
     // Sessions List
     let sessions_items: Vec<ListItem> = state.sessions
@@ -415,25 +477,27 @@ fn ui(f: &mut Frame, state: &mut TuiState) {
     f.render_stateful_widget(apps_list, rects.apps, &mut state.app_list_state);
 
     // Settings
-    let target_str = match state.target_type {
-        TargetType::Prompt => "Prompt (Top Pane)",
-        TargetType::Command => "Command (Bottom/2nd Pane)",
-    };
-    
-    let ultrathink_str = if state.ultrathink { "[x] Ultrathink" } else { "[ ] Ultrathink" };
-    
-    let settings_text = vec![
-        Line::from(Span::styled("Target Type (p/c): ", Style::default().add_modifier(Modifier::BOLD))),
-        Line::from(format!("  {}", target_str)),
-        Line::from(""),
-        Line::from(Span::styled("Options (u):", Style::default().add_modifier(Modifier::BOLD))),
-        Line::from(format!("  {}", ultrathink_str)),
+    let settings_items = vec![
+        ListItem::new(Line::from(vec![
+            Span::styled(if state.target_type == TargetType::Prompt { " (•) " } else { " ( ) " }, Style::default().fg(Color::Cyan)),
+            Span::raw("Target: Prompt (Top Pane)"),
+        ])),
+        ListItem::new(Line::from(vec![
+            Span::styled(if state.target_type == TargetType::Command { " (•) " } else { " ( ) " }, Style::default().fg(Color::Cyan)),
+            Span::raw("Target: Command (Bottom Pane)"),
+        ])),
+        ListItem::new(Line::from(vec![
+            Span::styled(if state.ultrathink { " [x] " } else { " [ ] " }, Style::default().fg(Color::Cyan)),
+            Span::raw("Ultrathink"),
+        ])),
     ];
-    
-    let settings = Paragraph::new(settings_text)
-        .block(Block::default().borders(Borders::ALL).title(" Settings ")
-        .border_style(if state.focused == FocusedWindow::Settings { Style::default().fg(Color::Yellow) } else { Style::default() }));
-    f.render_widget(settings, rects.settings);
+
+    let settings_list = List::new(settings_items)
+        .block(Block::default().borders(Borders::ALL).title(" Settings (Space to toggle) ")
+        .border_style(if state.focused == FocusedWindow::Settings { Style::default().fg(Color::Yellow) } else { Style::default() }))
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::DarkGray))
+        .highlight_symbol("> ");
+    f.render_stateful_widget(settings_list, rects.settings, &mut state.settings_list_state);
 }
 
 fn find_active_sessions(project_name: &str) -> Result<Vec<String>> {
@@ -466,6 +530,33 @@ fn find_active_sessions(project_name: &str) -> Result<Vec<String>> {
         // If no matches found, return all sessions to let user choose
         Ok(all_sessions)
     }
+}
+
+fn calculate_cursor_pos(input: &str, cursor_idx: usize, max_width: u16) -> (u16, u16) {
+    if input.is_empty() {
+        return (0, 0);
+    }
+
+    let mut x = 0;
+    let mut y = 0;
+    
+    for (i, c) in input.char_indices() {
+        if i == cursor_idx {
+            break;
+        }
+        if c == '\n' {
+            x = 0;
+            y += 1;
+        } else {
+            x += 1;
+            if x >= max_width {
+                x = 0;
+                y += 1;
+            }
+        }
+    }
+    
+    (x, y)
 }
 
 fn execute_send_action(action: SendAction) -> Result<()> {
