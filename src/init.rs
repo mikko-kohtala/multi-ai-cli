@@ -275,6 +275,7 @@ impl WizardState {
             .map(|(&idx, cmd)| AiApp {
                 name: AiService::SERVICES[idx].name.to_string(),
                 command: cmd.clone(),
+                ultrathink: None,
             })
             .collect();
 
