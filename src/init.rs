@@ -1,6 +1,6 @@
 use crate::config::{AiApp, Mode, ProjectConfig};
 use crate::error::Result;
-use crossterm::{
+use ratatui::crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},

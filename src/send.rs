@@ -1,8 +1,9 @@
 use crate::config::{AiApp, ProjectConfig};
 use crate::error::{MultiAiError, Result};
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
-    execute,
+use ratatui::crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
+            KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
+    execute, queue,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
@@ -79,12 +80,21 @@ impl TuiState {
         }
     }
 
-    fn on_key(&mut self, key: KeyCode, _modifiers: KeyModifiers) {
+    fn insert_newline(&mut self) {
+        self.input.insert(self.cursor_position, '\n');
+        self.cursor_position += 1;
+    }
+
+    fn on_key(&mut self, key: KeyCode, modifiers: KeyModifiers) {
         match self.focused {
             FocusedWindow::Input => match key {
                 KeyCode::Enter => {
-                    self.input.insert(self.cursor_position, '\n');
-                    self.cursor_position += 1;
+                    // Only Shift+Enter creates a newline in the input field
+                    // Plain Enter and Ctrl+Enter are handled by the main loop for sending
+                    if modifiers.contains(KeyModifiers::SHIFT) {
+                        self.insert_newline();
+                    }
+                    // Otherwise, do nothing - let main loop handle sending
                 }
                 KeyCode::Char(c) => {
                     if self.cursor_position >= self.input.len() {
@@ -205,6 +215,28 @@ impl TuiState {
         }
     }
 
+    fn create_send_action(&self) -> Option<SendAction> {
+        if let Some(session_idx) = self.session_list_state.selected() {
+            if let Some(list_idx) = self.app_list_state.selected() {
+                let app_index = if list_idx == 0 {
+                    None
+                } else {
+                    Some(list_idx - 1)
+                };
+
+                return Some(SendAction {
+                    session_name: self.sessions[session_idx].clone(),
+                    app_index,
+                    target_type: self.target_type,
+                    text: self.input.clone(),
+                    ultrathink: self.ultrathink,
+                    apps: self.apps.clone(),
+                });
+            }
+        }
+        None
+    }
+
     // Handling mouse clicks (simplified)
     fn on_click(&mut self, column: u16, row: u16, rects: &LayoutRects) {
         let position = Position { x: column, y: row };
@@ -244,6 +276,22 @@ pub fn run_send_command(project_config: ProjectConfig, project_name: String) -> 
     // 2. Setup terminal
     enable_raw_mode().map_err(|e| MultiAiError::CommandFailed(format!("Failed to enable raw mode: {}", e)))?;
     let mut stdout = io::stdout();
+
+    // Enable keyboard enhancement protocol for proper Shift+Enter detection
+    // This allows terminals to send modifier information with special keys
+    let mut keyboard_enhancement_enabled = false;
+    if matches!(ratatui::crossterm::terminal::supports_keyboard_enhancement(), Ok(true)) {
+        queue!(
+            stdout,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            )
+        ).map(|_| keyboard_enhancement_enabled = true)
+        .map_err(|e| MultiAiError::CommandFailed(format!("Failed to enable keyboard enhancement: {}", e)))?;
+    }
+
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
         .map_err(|e| MultiAiError::CommandFailed(format!("Failed to setup terminal: {}", e)))?;
     let backend = CrosstermBackend::new(stdout);
@@ -253,26 +301,30 @@ pub fn run_send_command(project_config: ProjectConfig, project_name: String) -> 
     // 3. Create state
     let mut state = TuiState::new(sessions, project_config.ai_apps.clone());
 
-    // 4. Run loop
+    // 4. Run loop (sends are executed inside the loop now)
     let result = run_app(&mut terminal, &mut state);
 
     // 5. Restore terminal
     disable_raw_mode().map_err(|_| MultiAiError::CommandFailed("Failed to disable raw mode".to_string()))?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    ).map_err(|_| MultiAiError::CommandFailed("Failed to restore terminal".to_string()))?;
+
+    if keyboard_enhancement_enabled {
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            PopKeyboardEnhancementFlags
+        ).map_err(|_| MultiAiError::CommandFailed("Failed to restore terminal".to_string()))?;
+    } else {
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+        ).map_err(|_| MultiAiError::CommandFailed("Failed to restore terminal".to_string()))?;
+    }
     terminal.show_cursor().map_err(|_| MultiAiError::CommandFailed("Failed to show cursor".to_string()))?;
 
-    // 6. Execute action if confirmed
-    if let Ok(Some(action)) = result {
-        execute_send_action(action)?;
-    } else if let Err(e) = result {
-        eprintln!("Error: {}", e);
-    }
-
-    Ok(())
+    // 6. Handle any errors from the TUI loop
+    result
 }
 
 struct SendAction {
@@ -284,7 +336,7 @@ struct SendAction {
     apps: Vec<AiApp>,
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TuiState) -> Result<Option<SendAction>> {
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TuiState) -> Result<()> {
     loop {
         let _layout_rects = terminal.draw(|f| ui(f, state))
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to draw TUI: {}", e)))?
@@ -294,6 +346,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TuiState) -> Resu
         if event::poll(std::time::Duration::from_millis(100)).map_err(|e| MultiAiError::CommandFailed(format!("Poll error: {}", e)))? {
             match event::read().map_err(|e| MultiAiError::CommandFailed(format!("Read error: {}", e)))? {
                 Event::Key(key) => {
+                    // Only process key press events, not release (for cross-platform consistency)
+                    use ratatui::crossterm::event::KeyEventKind;
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
+
                     // Ctrl+C handling
                     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                         if state.focused == FocusedWindow::Input && !state.input.is_empty() {
@@ -307,7 +365,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TuiState) -> Resu
                             // Consume the event (don't quit)
                             continue;
                         } else {
-                            return Ok(None);
+                            return Ok(());
                         }
                     }
 
@@ -318,34 +376,30 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TuiState) -> Resu
                     
                     if state.focused != FocusedWindow::Input {
                          if key.code == KeyCode::Char('q') {
-                             return Ok(None);
+                             return Ok(());
                          }
                     }
-                    
-                    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
-                        // Confirm and Send
-                         if let Some(session_idx) = state.session_list_state.selected() {
-                            if let Some(list_idx) = state.app_list_state.selected() {
-                                let text = state.input.clone();
-                                
-                                let app_index = if list_idx == 0 {
-                                    None
-                                } else {
-                                    Some(list_idx - 1)
-                                };
-                                
-                                return Ok(Some(SendAction {
-                                    session_name: state.sessions[session_idx].clone(),
-                                    app_index,
-                                    target_type: state.target_type,
-                                    text,
-                                    ultrathink: state.ultrathink,
-                                    apps: state.apps.clone(),
-                                }));
+
+                    // Handle Enter key for sending (both plain Enter and Ctrl+Enter)
+                    // NOTE: Keyboard enhancement protocol allows Shift+Enter to be detected.
+                    // When enabled, Shift+Enter will have the SHIFT modifier and insert newline.
+                    if key.code == KeyCode::Enter && state.focused == FocusedWindow::Input {
+                        // Plain Enter or Ctrl+Enter sends the message
+                        // Shift+Enter is handled by on_key() to insert newline
+                        if !key.modifiers.contains(KeyModifiers::SHIFT) {
+                            if let Some(action) = state.create_send_action() {
+                                // Execute send immediately without exiting TUI
+                                if let Err(e) = execute_send_action(action) {
+                                    // On error, continue running TUI (user can try again)
+                                    eprintln!("Failed to send: {}", e);
+                                }
+                                // Text stays in input field, TUI stays open for more messages
                             }
+                            // Don't pass Enter to on_key() to avoid inserting newline
+                            continue;
                         }
                     }
-                    
+
                     state.on_key(key.code, key.modifiers);
                 }
                 Event::Mouse(mouse) => {
@@ -411,15 +465,15 @@ fn ui(f: &mut Frame, state: &mut TuiState) {
     let input_title = if state.confirm_clear {
         " Input (Press Ctrl+C again to clear) "
     } else {
-        " Input (Ctrl+Enter to Send) "
+        " Input (Enter to Send, Shift+Enter for newline) "
     };
     
     let input_block = Block::default()
         .borders(Borders::ALL)
         .title(input_title)
         .border_style(if state.focused == FocusedWindow::Input { 
-            if state.confirm_clear { Style::default().fg(Color::Red) }
-            else { Style::default().fg(Color::Yellow) }
+            if state.confirm_clear { Style::default().fg(Color::Red).add_modifier(Modifier::BOLD) }
+            else { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) }
         } else { Style::default() });
     
     // Handle cursor position logic for multiple lines (not implemented in Paragraph directly)
@@ -456,7 +510,7 @@ fn ui(f: &mut Frame, state: &mut TuiState) {
     
     let sessions_list = List::new(sessions_items)
         .block(Block::default().borders(Borders::ALL).title(" Sessions ")
-        .border_style(if state.focused == FocusedWindow::SessionList { Style::default().fg(Color::Yellow) } else { Style::default() }))
+        .border_style(if state.focused == FocusedWindow::SessionList { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default() }))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))
         .highlight_symbol(">> ");
     f.render_stateful_widget(sessions_list, rects.sessions, &mut state.session_list_state);
@@ -471,7 +525,7 @@ fn ui(f: &mut Frame, state: &mut TuiState) {
 
     let apps_list = List::new(apps_items)
         .block(Block::default().borders(Borders::ALL).title(" Target App (Column) ")
-        .border_style(if state.focused == FocusedWindow::AppList { Style::default().fg(Color::Yellow) } else { Style::default() }))
+        .border_style(if state.focused == FocusedWindow::AppList { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default() }))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))
         .highlight_symbol(">> ");
     f.render_stateful_widget(apps_list, rects.apps, &mut state.app_list_state);
@@ -494,7 +548,7 @@ fn ui(f: &mut Frame, state: &mut TuiState) {
 
     let settings_list = List::new(settings_items)
         .block(Block::default().borders(Borders::ALL).title(" Settings (Space to toggle) ")
-        .border_style(if state.focused == FocusedWindow::Settings { Style::default().fg(Color::Yellow) } else { Style::default() }))
+        .border_style(if state.focused == FocusedWindow::Settings { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default() }))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::DarkGray))
         .highlight_symbol("> ");
     f.render_stateful_widget(settings_list, rects.settings, &mut state.settings_list_state);
