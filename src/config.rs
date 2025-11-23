@@ -43,6 +43,8 @@ impl Mode {
 pub struct AiApp {
     pub name: String,
     pub command: String,
+    #[serde(default)]
+    pub ultrathink: Option<String>,
 }
 
 impl AiApp {

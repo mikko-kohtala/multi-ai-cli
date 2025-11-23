@@ -3,6 +3,7 @@ mod error;
 mod init;
 #[cfg(target_os = "macos")]
 mod iterm2;
+mod send;
 mod tmux;
 mod worktree;
 
@@ -125,6 +126,21 @@ enum Command {
         )]
         mode: Option<ModeOverride>,
     },
+
+    #[command(about = "Send messages to tmux panes via TUI")]
+    Send {
+        #[arg(help = "Optional: specific session name to target")]
+        session: Option<String>,
+
+        #[arg(long, help = "Send a single message and exit (non-interactive)")]
+        message: Option<String>,
+
+        #[arg(long, help = "Target pane IDs (comma-separated, e.g., %0,%1)")]
+        panes: Option<String>,
+
+        #[arg(long, help = "Enable deep thinking mode (appends ultrathink phrase)")]
+        ultrathink: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -172,6 +188,12 @@ fn main() -> Result<()> {
             tmux,
             mode,
         }) => continue_command(branch_prefix, tmux, mode),
+        Some(Command::Send {
+            session,
+            message,
+            panes,
+            ultrathink,
+        }) => send_command(session, message, panes, ultrathink),
         None => {
             eprintln!("Error: Command required. Use 'mai add <branch-prefix>' or 'mai remove <branch-prefix>'");
             eprintln!("Run 'mai --help' for more information.");
@@ -635,6 +657,24 @@ fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
 
     ProjectConfig::from_json(&content)
         .map_err(|e| MultiAiError::Config(format!("Failed to parse project config: {}", e)))
+}
+
+fn send_command(
+    session: Option<String>,
+    message: Option<String>,
+    panes: Option<String>,
+    ultrathink: bool,
+) -> Result<()> {
+    // If message is provided, use non-interactive mode
+    if let Some(msg) = message {
+        let pane_ids = panes.map(|p| p.split(',').map(|s| s.trim().to_string()).collect());
+        send::send_non_interactive(session, msg, pane_ids, ultrathink)
+            .map_err(|e| MultiAiError::Config(format!("Failed to send message: {}", e)))
+    } else {
+        // Interactive TUI mode
+        send::run_interactive_send(session)
+            .map_err(|e| MultiAiError::Config(format!("TUI error: {}", e)))
+    }
 }
 
 fn ask_confirmation(question: &str) -> Result<bool> {

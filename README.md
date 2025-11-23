@@ -21,7 +21,9 @@ The following AI development tools are supported:
 - 🌳 **Git Worktree Management**: Automatically creates and manages git worktrees for each AI tool
 - 🖥️ **iTerm2 Integration** (`mode: "iterm2"` on macOS): Creates tabs with split panes for each AI application
 - 🎛️ **Tmux Support** (`mode: "tmux-single-window"` or `"tmux-multi-window"`): Creates tmux sessions with organized windows and panes
+- 📨 **Interactive Message Sending**: TUI for sending messages/commands to AI tools and shell panes in tmux sessions
 - 🎨 **Flexible Configuration**: Define custom commands for each AI tool
+- 🧠 **Deep Thinking Mode**: Optional ultrathink phrases per AI tool for enhanced reasoning
 - 🚀 **Quick Setup**: Single command to set up multiple AI environments
 
 ## Prerequisites
@@ -73,10 +75,11 @@ Or create it manually:
   "ai_apps": [
     {
       "name": "claude",
-      "command": "claude --dangerously-skip-permissions"
+      "command": "claude --dangerously-skip-permissions",
+      "ultrathink": "ultrathink"  // Optional: phrase to append for deep thinking mode
     },
     {
-      "name": "gemini", 
+      "name": "gemini",
       "command": "gemini --yolo"
     },
     {
@@ -85,7 +88,8 @@ Or create it manually:
     },
     {
       "name": "amp",
-      "command": "amp --dangerously-allow-all"
+      "command": "amp --dangerously-allow-all",
+      "ultrathink": "Use oracle and think heavily"
     },
     {
       "name": "opencode",
@@ -106,6 +110,7 @@ Or create it manually:
 - `ai_apps`: Array of AI applications to configure
   - `name`: The name of the AI tool (used for branch naming)
   - `command`: The full command to launch the AI tool with any flags
+  - `ultrathink` (optional): Custom phrase to append when deep thinking mode is enabled in `mai send` (defaults: "ultrathink" for claude, "Use oracle and think heavily" for amp)
 
 ## Usage
 
@@ -152,6 +157,69 @@ This will:
 3. Each tab/window will have the same layout as `add` command
 
 **Note**: If worktrees don't exist, you'll get an error asking you to run `mai add` first.
+
+### Send messages to tmux panes (Interactive TUI)
+
+The `send` command provides an interactive terminal UI for sending messages to running AI tools and shell panes in your tmux sessions:
+
+```bash
+# Launch interactive TUI
+mai send
+
+# Target a specific session
+mai send my-project-feature-branch
+```
+
+**TUI Features**:
+- **Text Input** (left panel): Type your message with multi-line support (Shift+Enter for newlines)
+- **Target Selection** (upper right): View and select tmux sessions and panes
+- **Options** (lower right): Toggle message type (Prompt/Command), target mode (All/Selected), and deep thinking
+- **Mouse Support**: Click to select panes and navigate
+- **Keyboard Shortcuts**:
+  - `Enter`: Send message
+  - `Tab`: Switch between panels
+  - `Space`: Toggle pane selection (in pane list)
+  - `T`: Toggle message type (Prompt ↔ Command)
+  - `M`: Toggle target mode (All ↔ Selected)
+  - `D`: Toggle deep thinking mode
+  - `A`: Quick select all AI panes
+  - `S`: Quick select all shell panes
+  - `Esc`: Quit
+
+**Message Types**:
+- **Prompt**: Sends to AI tool panes (top panes). Optionally appends ultrathink phrase for deeper reasoning
+- **Command**: Sends to shell panes (bottom panes) for executing shell commands
+
+**Target Modes**:
+- **All**: Sends to all panes matching the message type (all AI panes or all shell panes)
+- **Selected**: Sends only to specifically checked panes
+
+**Deep Thinking Mode**: When enabled for prompts, appends an ultrathink phrase configured per AI tool to encourage deeper reasoning.
+
+### Send messages non-interactively (CLI mode)
+
+For automation and scripting, use the non-interactive CLI mode:
+
+```bash
+# Send to all AI panes in a session (default)
+mai send --message "Implement user authentication"
+
+# Target specific session
+mai send my-project-feature --message "Fix the bug in auth.rs"
+
+# Send to specific panes by ID
+mai send --message "Run tests" --panes "%0,%2"
+
+# Enable deep thinking mode
+mai send --message "Optimize this algorithm" --ultrathink
+```
+
+**CLI Options**:
+- `--message <TEXT>`: Message to send (enables non-interactive mode)
+- `--panes <IDS>`: Comma-separated pane IDs (e.g., `%0,%1,%2`)
+- `--ultrathink`: Enable deep thinking mode (appends ultrathink phrase)
+
+**Finding Pane IDs**: Use `tmux list-panes -a -F "#{session_name}:#{window_name} #{pane_id} #{pane_current_command}"` to see all panes and their IDs.
 
 ### Remove worktrees and cleanup
 

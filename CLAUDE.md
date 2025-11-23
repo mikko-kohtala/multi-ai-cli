@@ -68,6 +68,13 @@ mai resume <branch-prefix>                   # Alias for continue
 
 # Initialize a new config file:
 mai init                                      # Interactive setup of multi-ai-config.jsonc
+
+# Send messages to tmux panes:
+mai send                                      # Interactive TUI for sending messages
+mai send session-name                         # Target specific session
+mai send --message "Fix the bug"              # Non-interactive mode
+mai send --message "..." --panes "%0,%1"      # Target specific panes
+mai send --message "..." --ultrathink         # Enable deep thinking mode
 ```
 
 ### Test
@@ -94,7 +101,7 @@ cargo fmt      # Format code according to Rust standards
    - `ProjectConfig`: Reads `multi-ai-config.jsonc` for AI apps list and `mode`
    - `Mode`: enum for `iterm2`, `tmux-single-window`, `tmux-multi-window` (optional; defaults: macOS → iterm2, others → tmux-single-window)
    - `TmuxLayout`: internal enum used by tmux adapter (`SingleWindow`, `MultiWindow`)
-   - `AiApp` struct: Defines AI tool name and full command to execute
+   - `AiApp` struct: Defines AI tool name, full command, and optional ultrathink phrase
 
 3. **worktree.rs**: `WorktreeManager` interfaces with gwt CLI to:
    - Create git worktrees for each AI app with naming pattern: `<branch-prefix>-<ai-app>`
@@ -117,7 +124,25 @@ cargo fmt      # Format code according to Rust standards
    - Launch pane: original pane per app (left for multi_window, top for single_window) runs the AI tool (500ms delay before sending)
    - Pane targeting uses `#{pane_id}` captured pre-split to avoid index assumptions
 
-6. **error.rs**: Custom error types using thiserror for structured error handling
+6. **send.rs**: Message sending to tmux panes via interactive TUI or CLI:
+   - **Interactive Mode** (`mai send`): Full-featured TUI built with ratatui
+     - Three-panel layout: text input (left), target selection (upper-right), options (lower-right)
+     - Mouse and keyboard support for navigation and selection
+     - Real-time session and pane discovery from running tmux sessions
+     - Message type selection: Prompt (AI panes) vs Command (shell panes)
+     - Target mode: All panes or specific selection
+     - Deep thinking toggle: appends ultrathink phrase from config
+   - **Non-interactive Mode** (`mai send --message "..."`): CLI automation
+     - Direct message sending without TUI
+     - Support for targeting specific panes by ID
+     - Ultrathink mode via `--ultrathink` flag
+   - **Pane Classification**: Automatically identifies AI vs shell panes based on:
+     - `pane_current_command`: matches against shell names (zsh/bash/sh/fish)
+     - Pane index patterns for single-window layout (even=AI, odd=shell)
+     - Window names for multi-window layout
+   - **Ultrathink Integration**: Reads per-tool ultrathink phrases from `ai_apps[].ultrathink` field
+
+7. **error.rs**: Custom error types using thiserror for structured error handling
 
 ### Key Implementation Details
 
@@ -135,7 +160,13 @@ cargo fmt      # Format code according to Rust standards
 
 ### Dependencies
 - External tools: gwt CLI, tmux
-- Key crates: clap (CLI), serde (serialization), jsonc-parser (JSONC support), thiserror (errors)
+- Key crates:
+  - clap (CLI argument parsing)
+  - serde (serialization)
+  - jsonc-parser (JSONC support)
+  - thiserror (error handling)
+  - ratatui (TUI framework for `mai send`)
+  - crossterm (terminal manipulation)
 
 ## Known Issues & Fixes
 
