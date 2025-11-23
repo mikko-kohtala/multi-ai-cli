@@ -5,7 +5,8 @@
 	"ai_apps": [
 		{
 			"name": "claude",
-			"command": "claude --dangerously-skip-permissions"
+			"command": "claude --dangerously-skip-permissions",
+			"ultrathink": "ultrathink"
 		},
 		{
 			"name": "gemini",
@@ -17,7 +18,8 @@
 		},
 		{
 			"name": "amp",
-			"command": "amp --dangerously-allow-all"
+			"command": "amp --dangerously-allow-all",
+			"ultrathink": "Use oracle and think heavily"
 		},
 		{
 			"name": "opencode",

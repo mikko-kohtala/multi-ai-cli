@@ -3,6 +3,7 @@ mod error;
 mod init;
 #[cfg(target_os = "macos")]
 mod iterm2;
+mod send;
 mod tmux;
 mod worktree;
 
@@ -42,6 +43,9 @@ struct Args {
 enum Command {
     #[command(about = "Initialize multi-ai-config.jsonc file interactively")]
     Init,
+
+    #[command(about = "Send prompts or commands into running AI tmux panes")]
+    Send,
 
     #[command(about = "Add worktrees and session for multiple AI tools")]
     Add {
@@ -151,6 +155,7 @@ fn main() -> Result<()> {
 
     match args.command {
         Some(Command::Init) => init::run_init(),
+        Some(Command::Send) => send::run_send(),
         Some(Command::Add {
             branch_prefix,
             tmux,
@@ -193,7 +198,7 @@ fn system_default_mode() -> Mode {
 }
 
 /// Find a config file by checking current directory first, then ./main/ subdirectory
-fn find_config_file(base_path: &Path, filename: &str) -> Option<PathBuf> {
+pub(crate) fn find_config_file(base_path: &Path, filename: &str) -> Option<PathBuf> {
     // First check current directory
     let current_path = base_path.join(filename);
     if current_path.exists() {
@@ -622,7 +627,7 @@ fn continue_command(
     Ok(())
 }
 
-fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
+pub(crate) fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
     // Look for .jsonc in current directory or ./main/ subdirectory
     let config_path = find_config_file(project_path, "multi-ai-config.jsonc")
         .ok_or_else(|| MultiAiError::Config(

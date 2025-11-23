@@ -1,8 +1,16 @@
 use crate::config::{AiApp, TmuxLayout};
 use crate::error::{MultiAiError, Result};
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
+
+#[derive(Debug, Clone)]
+pub struct PaneInfo {
+    pub id: String,
+    pub left: u32,
+    pub top: u32,
+}
 
 pub struct TmuxManager {
     session_name: String,
@@ -14,13 +22,47 @@ impl TmuxManager {
         Self { session_name }
     }
 
+    pub fn from_session_name(session_name: &str) -> Self {
+        Self {
+            session_name: session_name.to_string(),
+        }
+    }
+
+    pub fn list_sessions() -> Result<Vec<String>> {
+        if !Self::is_tmux_installed() {
+            return Err(MultiAiError::Tmux(
+                "tmux is not installed or not in PATH".to_string(),
+            ));
+        }
+
+        let output = Command::new("tmux")
+            .args(["list-sessions", "-F", "#S"])
+            .output()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to list sessions: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to list tmux sessions: {}",
+                stderr.trim()
+            )));
+        }
+
+        let sessions = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|s| s.to_string())
+            .collect();
+
+        Ok(sessions)
+    }
+
     pub fn create_session(
         &self,
         _ai_apps: &[AiApp],
         worktree_paths: &[(AiApp, String)],
         layout: TmuxLayout,
     ) -> Result<()> {
-        if !self.is_tmux_installed() {
+        if !Self::is_tmux_installed() {
             return Err(MultiAiError::Tmux("tmux is not installed".to_string()));
         }
 
@@ -57,6 +99,47 @@ impl TmuxManager {
         Ok(())
     }
 
+    pub fn list_panes_in_window(&self, window: &str) -> Result<Vec<PaneInfo>> {
+        let target = format!("{}:{}", self.session_name, window);
+        let output = Command::new("tmux")
+            .args([
+                "list-panes",
+                "-F",
+                "#{pane_id}\t#{pane_left}\t#{pane_top}",
+                "-t",
+                &target,
+            ])
+            .output()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to list panes: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to list panes for {}: {}",
+                target,
+                stderr.trim()
+            )));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut panes = Vec::new();
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < 3 {
+                continue;
+            }
+            let left = parts[1].parse::<u32>().unwrap_or(0);
+            let top = parts[2].parse::<u32>().unwrap_or(0);
+            panes.push(PaneInfo {
+                id: parts[0].to_string(),
+                left,
+                top,
+            });
+        }
+
+        Ok(panes)
+    }
+
     fn select_window(&self, window: &str) -> Result<()> {
         let output = Command::new("tmux")
             .args([
@@ -74,6 +157,73 @@ impl TmuxManager {
                 stderr
             )));
         }
+
+        Ok(())
+    }
+
+    pub fn paste_text_to_pane(&self, pane_id: &str, text: &str, send_enter: bool) -> Result<()> {
+        let buffer_name = format!("mai-send-{}", self.session_name);
+
+        // Load buffer with provided text
+        let mut load = Command::new("tmux")
+            .args(["load-buffer", "-b", &buffer_name, "-"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                MultiAiError::CommandFailed(format!("Failed to load tmux buffer: {}", e))
+            })?;
+
+        if let Some(stdin) = load.stdin.as_mut() {
+            stdin.write_all(text.as_bytes()).map_err(|e| {
+                MultiAiError::CommandFailed(format!("Failed to write to tmux buffer: {}", e))
+            })?;
+        }
+
+        // Close stdin to signal EOF
+        let _ = load.stdin.take();
+
+        let status = load
+            .wait()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to load buffer: {}", e)))?;
+
+        if !status.success() {
+            return Err(MultiAiError::Tmux("tmux load-buffer failed".to_string()));
+        }
+
+        let paste = Command::new("tmux")
+            .args(["paste-buffer", "-b", &buffer_name, "-t", pane_id])
+            .output()
+            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to paste buffer: {}", e)))?;
+
+        if !paste.status.success() {
+            let stderr = String::from_utf8_lossy(&paste.stderr);
+            return Err(MultiAiError::Tmux(format!(
+                "Failed to paste buffer: {}",
+                stderr.trim()
+            )));
+        }
+
+        if send_enter {
+            let output = Command::new("tmux")
+                .args(["send-keys", "-t", pane_id, "Enter"])
+                .output()
+                .map_err(|e| {
+                    MultiAiError::CommandFailed(format!("Failed to send enter key: {}", e))
+                })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(MultiAiError::Tmux(format!(
+                    "Failed to send enter key: {}",
+                    stderr.trim()
+                )));
+            }
+        }
+
+        // Best-effort cleanup
+        let _ = Command::new("tmux")
+            .args(["delete-buffer", "-b", &buffer_name])
+            .output();
 
         Ok(())
     }
@@ -235,7 +385,7 @@ impl TmuxManager {
     }
 
     pub fn kill_session(&self) -> Result<()> {
-        if !self.is_tmux_installed() {
+        if !Self::is_tmux_installed() {
             return Err(MultiAiError::Tmux("tmux is not installed".to_string()));
         }
 
@@ -262,7 +412,7 @@ impl TmuxManager {
         Ok(())
     }
 
-    fn is_tmux_installed(&self) -> bool {
+    pub fn is_tmux_installed() -> bool {
         Command::new("tmux")
             .arg("-V")
             .output()

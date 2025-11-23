@@ -73,7 +73,8 @@ Or create it manually:
   "ai_apps": [
     {
       "name": "claude",
-      "command": "claude --dangerously-skip-permissions"
+      "command": "claude --dangerously-skip-permissions",
+      "ultrathink": "ultrathink"
     },
     {
       "name": "gemini", 
@@ -85,7 +86,8 @@ Or create it manually:
     },
     {
       "name": "amp",
-      "command": "amp --dangerously-allow-all"
+      "command": "amp --dangerously-allow-all",
+      "ultrathink": "Use oracle and think heavily"
     },
     {
       "name": "opencode",
@@ -106,6 +108,7 @@ Or create it manually:
 - `ai_apps`: Array of AI applications to configure
   - `name`: The name of the AI tool (used for branch naming)
   - `command`: The full command to launch the AI tool with any flags
+  - `ultrathink` (optional): Hint appended to prompts when using `mai send` (e.g., `"ultrathink"` for Claude Code, `"Use oracle and think heavily"` for amp)
 
 ## Usage
 
@@ -152,6 +155,21 @@ This will:
 3. Each tab/window will have the same layout as `add` command
 
 **Note**: If worktrees don't exist, you'll get an error asking you to run `mai add` first.
+
+### Send prompts/commands into a running session
+
+Launch an interactive TUI to paste text into the tmux single-window layout:
+
+```bash
+mai send
+```
+
+- Left side: compose the prompt/command text (Ctrl+S to send)
+- Top-right: pick the tmux session and AI column, and choose whether to send as a prompt (top pane) or a command (second terminal in the column)
+- Bottom-right: toggle the per-tool `ultrathink` hint and other send options
+- Mouse and keyboard are both supported
+
+> Designed for the `tmux-single-window` layout where each AI app owns a column with a running pane on top and a shell underneath.
 
 ### Remove worktrees and cleanup
 
