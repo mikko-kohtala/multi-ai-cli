@@ -380,6 +380,19 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TuiState) -> Resu
                          }
                     }
 
+                    // Handle Shift+Enter (and common fallbacks) as newline insertion before send logic
+                    let is_newline = state.focused == FocusedWindow::Input && match key.code {
+                        KeyCode::Enter => key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT),
+                        KeyCode::Char('\n') | KeyCode::Char('\r') => true,
+                        // Ctrl+J is a common terminal newline fallback
+                        KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+                        _ => false,
+                    };
+                    if is_newline {
+                        state.insert_newline();
+                        continue;
+                    }
+
                     // Handle Enter key for sending (both plain Enter and Ctrl+Enter)
                     // NOTE: Keyboard enhancement protocol allows Shift+Enter to be detected.
                     // When enabled, Shift+Enter will have the SHIFT modifier and insert newline.
