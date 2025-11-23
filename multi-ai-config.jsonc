@@ -1,27 +1,19 @@
 {
-	// Example configuration for multi-ai CLI
-	"terminals_per_column": 2,  // Number of terminal panes per column (first is AI command, rest are shells)
-    "mode": "iterm2",           // Optional: iterm2 | tmux-single-window | tmux-multi-window (defaults: macOS→iterm2, others→tmux-single-window)
-	"ai_apps": [
-		{
-			"name": "claude",
-			"command": "claude --dangerously-skip-permissions"
-		},
-		{
-			"name": "gemini",
-			"command": "gemini --yolo"
-		},
-		{
-			"name": "codex",
-			"command": "codex --ask-for-approval never"
-		},
-		{
-			"name": "amp",
-			"command": "amp --dangerously-allow-all"
-		},
-		{
-			"name": "opencode",
-			"command": "opencode"
-		}
-	]
+  // Example configuration for multi-ai CLI
+  "terminals_per_column": 2, // Number of terminal panes per column (first is AI command, rest are shells)
+  "mode": "tmux-single-window", // Optional: iterm2 | tmux-single-window | tmux-multi-window (defaults: macOS→iterm2, others→tmux-single-window)
+  "ai_apps": [
+    {
+      "name": "claude",
+      "command": "claude --permission-mode plan --allow-dangerously-skip-permissions"
+    },
+    {
+      "name": "codex",
+      "command": "codex --yolo --model='gpt-5.1-codex-max' -c model_reasoning_effort='high'"
+    },
+    {
+      "name": "amp",
+      "command": "amp --dangerously-allow-all"
+    }
+  ]
 }
