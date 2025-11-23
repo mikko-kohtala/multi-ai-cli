@@ -3,6 +3,7 @@ mod error;
 mod init;
 #[cfg(target_os = "macos")]
 mod iterm2;
+mod send;
 mod tmux;
 mod worktree;
 
@@ -125,6 +126,9 @@ enum Command {
         )]
         mode: Option<ModeOverride>,
     },
+
+    #[command(about = "Send text to a running session via TUI")]
+    Send,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -172,6 +176,7 @@ fn main() -> Result<()> {
             tmux,
             mode,
         }) => continue_command(branch_prefix, tmux, mode),
+        Some(Command::Send) => send_command(),
         None => {
             eprintln!("Error: Command required. Use 'mai add <branch-prefix>' or 'mai remove <branch-prefix>'");
             eprintln!("Run 'mai --help' for more information.");
@@ -620,6 +625,27 @@ fn continue_command(
     }
 
     Ok(())
+}
+
+fn send_command() -> Result<()> {
+    let project_path = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
+
+    // Check for multi-ai-config.jsonc (current directory or ./main/ subdirectory)
+    let _config_path = find_config_file(&project_path, "multi-ai-config.jsonc")
+        .ok_or_else(|| MultiAiError::Config(
+            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please run 'mai send' from a directory containing this file.".to_string()
+        ))?;
+
+    let project_name = project_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
+        .to_string();
+
+    let project_config = load_project_config(&project_path)?;
+
+    send::run_send_command(project_config, project_name)
 }
 
 fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {

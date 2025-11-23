@@ -43,6 +43,8 @@ impl Mode {
 pub struct AiApp {
     pub name: String,
     pub command: String,
+    #[serde(default)]
+    pub ultrathink: Option<String>,
 }
 
 impl AiApp {
@@ -52,6 +54,10 @@ impl AiApp {
 
     pub fn command(&self) -> &str {
         &self.command
+    }
+    
+    pub fn ultrathink(&self) -> Option<&str> {
+        self.ultrathink.as_deref()
     }
 }
 

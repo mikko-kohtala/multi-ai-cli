@@ -165,6 +165,51 @@ mai remove feature-branch --mode tmux-multi-window
 mai remove feature-branch --force   # removes without prompting
 ```
 
+### Send commands to AI sessions
+
+The `mai send` command opens an interactive TUI that allows you to send prompts or commands to running AI sessions:
+
+```bash
+# From your project directory:
+cd ~/code/my-project
+mai send
+```
+
+This will:
+1. Detect active tmux sessions for your project
+2. Open an interactive TUI where you can:
+   - Type multi-line input
+   - Select which session and AI tool to send to
+   - Choose to send to the AI prompt pane or command shell pane
+   - Toggle "ultrathink" mode for supported AI tools
+
+#### Keyboard Controls
+
+- **Enter**: Send the message
+- **Shift+Enter**: Insert a newline (requires terminal configuration, see below)
+- **Ctrl+C**: Clear input (press twice to confirm)
+- **Tab**: Cycle focus between windows (Input → Sessions → Apps → Settings)
+- **Arrow keys**: Navigate lists
+- **Space/Enter** (in Settings): Toggle options
+- **q** (when not in Input): Quit
+
+#### Terminal Setup for Shift+Enter
+
+Most terminal emulators don't transmit the Shift modifier with Enter by default. To enable Shift+Enter for multi-line input, configure your terminal:
+
+**iTerm2 (macOS):**
+1. Open iTerm2 → Preferences (⌘,)
+2. Navigate to: **Profiles** → Select your profile → **Keys** tab
+3. Click **Key Mappings** → **+** (to add a new key mapping)
+4. Press **Shift+Enter** when prompted
+5. Set **Action** to: **Send Text**
+6. Set **Text** to: `\n` (literal backslash followed by n)
+7. Click **OK**
+
+**Alternative methods for multi-line input:**
+- Configure **Option+Enter** or **Ctrl+J** as alternatives
+- Use external editors and copy-paste for longer inputs
+
 ## Terminal Layout
 
 ### iTerm2 Mode (Default on macOS)

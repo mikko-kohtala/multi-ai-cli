@@ -1,6 +1,6 @@
 use crate::config::{AiApp, Mode, ProjectConfig};
 use crate::error::Result;
-use crossterm::{
+use ratatui::crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -275,6 +275,7 @@ impl WizardState {
             .map(|(&idx, cmd)| AiApp {
                 name: AiService::SERVICES[idx].name.to_string(),
                 command: cmd.clone(),
+                ultrathink: None,
             })
             .collect();
 

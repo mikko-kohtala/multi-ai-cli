@@ -65,6 +65,7 @@ mai remove <branch-prefix>                   # Remove worktrees and session
 mai remove <branch-prefix> --tmux            # Remove tmux session
 mai continue <branch-prefix>                 # Create new session/tab for existing worktrees
 mai resume <branch-prefix>                   # Alias for continue
+mai send                                     # Open TUI to send commands to sessions
 
 # Initialize a new config file:
 mai init                                      # Interactive setup of multi-ai-config.jsonc
