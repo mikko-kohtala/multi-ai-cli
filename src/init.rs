@@ -158,6 +158,11 @@ impl AiService {
                     description: "Standard mode - interactive GitHub Copilot CLI",
                     is_default: true,
                 },
+                CommandVariant {
+                    command: "copilot --allow-all-tools",
+                    description: "YOLO mode - auto-approve all tool calls",
+                    is_default: false,
+                },
             ],
         },
         AiService {
