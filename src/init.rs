@@ -126,11 +126,6 @@ impl AiService {
                     description: "Standard mode - interactive approval workflow",
                     is_default: true,
                 },
-                CommandVariant {
-                    command: "opencode --auto-approve",
-                    description: "Auto-approve mode - automatic execution (if supported)",
-                    is_default: false,
-                },
             ],
         },
         AiService {
