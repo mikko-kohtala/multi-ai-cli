@@ -283,6 +283,8 @@ impl WizardState {
             ai_apps,
             terminals_per_column: 2,
             mode: Some(self.terminal_mode.clone()),
+            project_path: None,
+            worktrees_path: None,
         }
     }
 }

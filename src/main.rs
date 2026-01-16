@@ -1,5 +1,6 @@
 mod config;
 mod error;
+mod git;
 mod init;
 #[cfg(target_os = "macos")]
 mod iterm2;
@@ -12,7 +13,6 @@ use config::{Mode, ProjectConfig, TmuxLayout};
 use error::{MultiAiError, Result};
 #[cfg(target_os = "macos")]
 use iterm2::ITerm2Manager;
-use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -197,18 +197,74 @@ fn system_default_mode() -> Mode {
     }
 }
 
-/// Find a config file by checking current directory first, then ./main/ subdirectory
-fn find_config_file(base_path: &Path, filename: &str) -> Option<PathBuf> {
+/// Find git-worktree-config.jsonc by checking:
+/// 1. Current directory
+/// 2. ./main/ subdirectory
+/// 3. Global gwt config by repo URL: ~/.config/git-worktree-cli/projects/{repo-name}.jsonc
+/// 4. Global gwt config by path match (worktreesPath in config)
+fn find_gwt_config_file(base_path: &Path) -> Option<PathBuf> {
     // First check current directory
-    let current_path = base_path.join(filename);
+    let current_path = base_path.join("git-worktree-config.jsonc");
     if current_path.exists() {
         return Some(current_path);
     }
 
     // Then check ./main/ subdirectory
-    let main_path = base_path.join("main").join(filename);
+    let main_path = base_path.join("main").join("git-worktree-config.jsonc");
     if main_path.exists() {
         return Some(main_path);
+    }
+
+    // Check global gwt configs - gwt uses ~/.config/ not the platform config dir
+    let home_dir = dirs::home_dir()?;
+    let gwt_projects_dir = home_dir.join(".config").join("git-worktree-cli").join("projects");
+    if !gwt_projects_dir.exists() {
+        return None;
+    }
+
+    // Try to find by repo URL first
+    if let Some(repo_url) = git::get_remote_origin_url(base_path) {
+        let config_filename = format!("{}.jsonc", git::generate_config_filename(&repo_url));
+        let global_path = gwt_projects_dir.join(&config_filename);
+        if global_path.exists() {
+            return Some(global_path);
+        }
+    }
+
+    // Search all global gwt configs for matching worktreesPath
+    let base_path_canonical = base_path.canonicalize().ok();
+
+    for entry in std::fs::read_dir(&gwt_projects_dir).ok()?.flatten() {
+        let path = entry.path();
+
+        if path.extension().map(|e| e == "jsonc").unwrap_or(false) {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(Some(serde_json::Value::Object(map))) =
+                    jsonc_parser::parse_to_serde_value(&content, &Default::default())
+                {
+                    // gwt uses camelCase: worktreesPath
+                    if let Some(serde_json::Value::String(worktrees_path)) = map.get("worktreesPath")
+                    {
+                        let wt_path = PathBuf::from(worktrees_path);
+
+                        let matches = if let Some(ref base_canonical) = base_path_canonical {
+                            if let Ok(wt_canonical) = wt_path.canonicalize() {
+                                base_canonical == &wt_canonical
+                                    || base_canonical.starts_with(&wt_canonical)
+                            } else {
+                                base_path == &wt_path || base_path.starts_with(&wt_path)
+                            }
+                        } else {
+                            base_path == &wt_path || base_path.starts_with(&wt_path)
+                        };
+
+                        if matches {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     None
@@ -219,19 +275,22 @@ fn create_command(
     cli_tmux: bool,
     mode_override: Option<ModeOverride>,
 ) -> Result<()> {
-    let project_path = std::env::current_dir()
+    let current_dir = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
-    // Check for multi-ai-config.jsonc (current directory or ./main/ subdirectory)
-    let _config_path = find_config_file(&project_path, "multi-ai-config.jsonc")
+    // Find config using the new search order
+    let (config_path, project_config, project_path) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
         .ok_or_else(|| MultiAiError::Config(
-            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please run 'mai add' from a directory containing this file.".to_string()
+            "multi-ai-config.jsonc not found. Searched: current directory, ./main/ subdirectory, parent directories, and global configs (~/.config/multi-ai-cli/projects/).".to_string()
         ))?;
 
-    // Check for git-worktree-config.jsonc (current directory or ./main/ subdirectory)
-    let _gwt_config_path = find_config_file(&project_path, "git-worktree-config.jsonc")
+    println!("Using config: {}", config_path.display());
+
+    // Check for git-worktree-config.jsonc (at the project path)
+    let _gwt_config_path = find_gwt_config_file(&project_path)
         .ok_or_else(|| MultiAiError::Config(
-            "git-worktree-config.jsonc not found in current directory or ./main/ subdirectory. Please ensure this file exists.".to_string()
+            format!("git-worktree-config.jsonc not found in {} or its ./main/ subdirectory. Please ensure this file exists.", project_path.display())
         ))?;
 
     let project_name = project_path
@@ -239,8 +298,6 @@ fn create_command(
         .and_then(|n| n.to_str())
         .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
         .to_string();
-
-    let project_config = load_project_config(&project_path)?;
 
     let worktree_manager = WorktreeManager::new(project_path.clone());
 
@@ -401,19 +458,22 @@ fn remove_command(
     mode_override: Option<ModeOverride>,
     force: bool,
 ) -> Result<()> {
-    let project_path = std::env::current_dir()
+    let current_dir = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
-    // Check for multi-ai-config.jsonc (current directory or ./main/ subdirectory)
-    let _config_path = find_config_file(&project_path, "multi-ai-config.jsonc")
+    // Find config using the new search order
+    let (config_path, project_config, project_path) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
         .ok_or_else(|| MultiAiError::Config(
-            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please run 'mai remove' from a directory containing this file.".to_string()
+            "multi-ai-config.jsonc not found. Searched: current directory, ./main/ subdirectory, parent directories, and global configs (~/.config/multi-ai-cli/projects/).".to_string()
         ))?;
 
-    // Check for git-worktree-config.jsonc (current directory or ./main/ subdirectory)
-    let _gwt_config_path = find_config_file(&project_path, "git-worktree-config.jsonc")
+    println!("Using config: {}", config_path.display());
+
+    // Check for git-worktree-config.jsonc (at the project path)
+    let _gwt_config_path = find_gwt_config_file(&project_path)
         .ok_or_else(|| MultiAiError::Config(
-            "git-worktree-config.jsonc not found in current directory or ./main/ subdirectory. Please ensure this file exists.".to_string()
+            format!("git-worktree-config.jsonc not found in {} or its ./main/ subdirectory. Please ensure this file exists.", project_path.display())
         ))?;
 
     let project_name = project_path
@@ -421,8 +481,6 @@ fn remove_command(
         .and_then(|n| n.to_str())
         .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
         .to_string();
-
-    let project_config = load_project_config(&project_path)?;
     let worktree_manager = WorktreeManager::new(project_path.clone());
 
     if !worktree_manager.has_gwt_cli() {
@@ -510,19 +568,22 @@ fn continue_command(
     cli_tmux: bool,
     mode_override: Option<ModeOverride>,
 ) -> Result<()> {
-    let project_path = std::env::current_dir()
+    let current_dir = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
-    // Check for multi-ai-config.jsonc (current directory or ./main/ subdirectory)
-    let _config_path = find_config_file(&project_path, "multi-ai-config.jsonc")
+    // Find config using the new search order
+    let (config_path, project_config, project_path) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
         .ok_or_else(|| MultiAiError::Config(
-            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please run 'mai continue' from a directory containing this file.".to_string()
+            "multi-ai-config.jsonc not found. Searched: current directory, ./main/ subdirectory, parent directories, and global configs (~/.config/multi-ai-cli/projects/).".to_string()
         ))?;
 
-    // Check for git-worktree-config.jsonc (current directory or ./main/ subdirectory)
-    let _gwt_config_path = find_config_file(&project_path, "git-worktree-config.jsonc")
+    println!("Using config: {}", config_path.display());
+
+    // Check for git-worktree-config.jsonc (at the project path)
+    let _gwt_config_path = find_gwt_config_file(&project_path)
         .ok_or_else(|| MultiAiError::Config(
-            "git-worktree-config.jsonc not found in current directory or ./main/ subdirectory. Please ensure this file exists.".to_string()
+            format!("git-worktree-config.jsonc not found in {} or its ./main/ subdirectory. Please ensure this file exists.", project_path.display())
         ))?;
 
     let project_name = project_path
@@ -530,8 +591,6 @@ fn continue_command(
         .and_then(|n| n.to_str())
         .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
         .to_string();
-
-    let project_config = load_project_config(&project_path)?;
     let worktree_manager = WorktreeManager::new(project_path.clone());
 
     // Check if worktrees exist
@@ -628,14 +687,17 @@ fn continue_command(
 }
 
 fn send_command() -> Result<()> {
-    let project_path = std::env::current_dir()
+    let current_dir = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
-    // Check for multi-ai-config.jsonc (current directory or ./main/ subdirectory)
-    let _config_path = find_config_file(&project_path, "multi-ai-config.jsonc")
+    // Find config using the new search order
+    let (config_path, project_config, project_path) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
         .ok_or_else(|| MultiAiError::Config(
-            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please run 'mai send' from a directory containing this file.".to_string()
+            "multi-ai-config.jsonc not found. Searched: current directory, ./main/ subdirectory, parent directories, and global configs (~/.config/multi-ai-cli/projects/).".to_string()
         ))?;
+
+    println!("Using config: {}", config_path.display());
 
     let project_name = project_path
         .file_name()
@@ -643,24 +705,7 @@ fn send_command() -> Result<()> {
         .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
         .to_string();
 
-    let project_config = load_project_config(&project_path)?;
-
     send::run_send_command(project_config, project_name)
-}
-
-fn load_project_config(project_path: &Path) -> Result<ProjectConfig> {
-    // Look for .jsonc in current directory or ./main/ subdirectory
-    let config_path = find_config_file(project_path, "multi-ai-config.jsonc")
-        .ok_or_else(|| MultiAiError::Config(
-            "multi-ai-config.jsonc not found in current directory or ./main/ subdirectory. Please create this file first."
-                .to_string(),
-        ))?;
-
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| MultiAiError::Config(format!("Failed to read project config: {}", e)))?;
-
-    ProjectConfig::from_json(&content)
-        .map_err(|e| MultiAiError::Config(format!("Failed to parse project config: {}", e)))
 }
 
 fn ask_confirmation(question: &str) -> Result<bool> {

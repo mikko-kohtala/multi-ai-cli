@@ -1,6 +1,6 @@
 [package]
 name = "multi-ai"
-version = "0.13.5"
+version = "0.14.2"
 edition = "2024"
 
 [[bin]]
