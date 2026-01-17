@@ -11,7 +11,7 @@ Multi-AI CLI is a Rust tool that manages multiple AI development environments us
 The following AI development tools are supported:
 - **claude**: Anthropic's AI assistant (with `--dangerously-skip-permissions` flag for YOLO mode)
 - **gemini**: Google's AI assistant (with `--yolo` flag for YOLO mode)
-- **codex**: GitHub Copilot's AI assistant (with `--ask-for-approval never` flag for YOLO mode)
+- **codex**: OpenAI Codex CLI (with `--yolo` flag for YOLO mode)
 - **amp**: AI assistant (with `--dangerously-allow-all` flag for YOLO mode)
 - **opencode**: AI coding assistant (no special flags for YOLO mode)
 - **cursor-agent**: Cursor AI assistant (with `--force` flag for YOLO mode)
@@ -43,11 +43,13 @@ cargo build --release # Release build for production use
 
 ### Run
 
-**Config File Locations**: Config files can be placed in either:
-- Current directory (checked first)
-- `./main/` subdirectory (checked second if not found in current directory)
+**Config Discovery**: Config files are searched in this order:
+- Current directory
+- `./main/` subdirectory
+- Parent directories (repeating the above checks at each level)
+- Global configs in the platform config directory (e.g., `~/.config/multi-ai-cli/projects/*.jsonc` on Linux)
 
-This allows you to keep config files version-controlled in a `./main/` subdirectory while maintaining worktrees at the repo root level.
+This allows you to keep config files version-controlled in a `./main/` subdirectory, or store them globally while maintaining worktrees at the repo root level.
 
 ```bash
 # From a directory with the required config files:
@@ -90,7 +92,7 @@ cargo fmt      # Format code according to Rust standards
 ### Core Flow
 1. **main.rs**: Entry point, handles CLI argument parsing via clap, orchestrates the add/remove commands
    - Commands work from current directory, no project path argument needed
-   - Validates presence of both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` in current directory or `./main/` subdirectory
+   - Searches for config files using hierarchical discovery (local, parent directories, global)
 2. **config.rs**: Manages project configuration:
    - `ProjectConfig`: Reads `multi-ai-config.jsonc` for AI apps list and `mode`
    - `Mode`: enum for `iterm2`, `tmux-single-window`, `tmux-multi-window` (optional; defaults: macOS → iterm2, others → tmux-single-window)
@@ -122,13 +124,9 @@ cargo fmt      # Format code according to Rust standards
 
 ### Key Implementation Details
 
-- **Current Directory Usage**: Commands must be run from directory containing config files
-- **Required Files**: Both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` must exist (current directory or `./main/` subdirectory)
-- **Config File Search**: Config files are searched in two locations:
-  1. Current directory (checked first)
-  2. `./main/` subdirectory (checked if not found in current directory)
-  - This allows keeping configs in git while maintaining worktrees at repo root
-  - `project_path` always remains the current directory (repo root), regardless of config location
+- **Hierarchical Config Discovery**: Config files are searched in current directory, `./main/` subdirectory, parent directories, and global config directory
+- **Required Files**: Both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` must exist
+- **Global Config Support**: Configs can be stored in platform config directory (e.g., `~/.config/multi-ai-cli/projects/`) with `project_path` and `worktrees_path` fields specifying target directories
 - **Tmux Pane Targeting**: Capture `#{pane_id}` of the original pane before splitting and target by ID. This works regardless of `base-index`/`pane-base-index`.
 - **Mode Defaults by OS**: If not specified via CLI or config, defaults to iTerm2 on macOS and tmux single-window elsewhere.
 - **Shell Initialization**: A 500ms delay ensures the shell is ready before sending commands
