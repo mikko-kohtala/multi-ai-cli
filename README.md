@@ -88,29 +88,29 @@ Or create it manually:
     {
       "name": "claude",
       "command": "claude --dangerously-skip-permissions",
-      "ultrathink": "ultrathink"
+      "ultrathink": "ultrathink",
     },
     {
       "name": "gemini",
-      "command": "gemini --yolo"
+      "command": "gemini --yolo",
     },
     {
       "name": "codex",
-      "command": "codex --yolo"
+      "command": "codex --yolo",
     },
     {
       "name": "amp",
-      "command": "amp --dangerously-allow-all"
+      "command": "amp --dangerously-allow-all",
     },
     {
       "name": "opencode",
-      "command": "opencode"
+      "command": "opencode",
     },
     {
       "name": "cursor-agent",
-      "command": "cursor-agent --force"
-    }
-  ]
+      "command": "cursor-agent --force",
+    },
+  ],
 }
 ```
 
@@ -339,3 +339,5 @@ Pane targeting details:
 ## License
 
 MIT
+
+JUST TESTING
