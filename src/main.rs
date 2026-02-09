@@ -201,7 +201,7 @@ fn system_default_mode() -> Mode {
 /// 1. Current directory
 /// 2. ./main/ subdirectory
 /// 3. Global gwt config by repo URL: ~/.config/git-worktree-cli/projects/{repo-name}.jsonc
-/// 4. Global gwt config by path match (worktreesPath in config)
+/// 4. Global gwt config by path match (worktreesPath or projectPath in config)
 fn find_gwt_config_file(base_path: &Path) -> Option<PathBuf> {
     // First check current directory
     let current_path = base_path.join("git-worktree-config.jsonc");
@@ -231,8 +231,22 @@ fn find_gwt_config_file(base_path: &Path) -> Option<PathBuf> {
         }
     }
 
-    // Search all global gwt configs for matching worktreesPath
+    // Search all global gwt configs for matching worktreesPath or projectPath
     let base_path_canonical = base_path.canonicalize().ok();
+
+    // Helper to check if a config path matches the base path
+    let check_path_match =
+        |base_canonical: &Option<PathBuf>, base: &Path, config_path: &PathBuf| -> bool {
+            if let Some(base_can) = base_canonical {
+                if let Ok(config_canonical) = config_path.canonicalize() {
+                    base_can == &config_canonical || base_can.starts_with(&config_canonical)
+                } else {
+                    base == config_path || base.starts_with(config_path)
+                }
+            } else {
+                base == config_path || base.starts_with(config_path)
+            }
+        };
 
     for entry in std::fs::read_dir(&gwt_projects_dir).ok()?.flatten() {
         let path = entry.path();
@@ -242,25 +256,35 @@ fn find_gwt_config_file(base_path: &Path) -> Option<PathBuf> {
                 if let Ok(Some(serde_json::Value::Object(map))) =
                     jsonc_parser::parse_to_serde_value(&content, &Default::default())
                 {
-                    // gwt uses camelCase: worktreesPath
-                    if let Some(serde_json::Value::String(worktrees_path)) = map.get("worktreesPath")
-                    {
-                        let wt_path = PathBuf::from(worktrees_path);
+                    // Check both worktreesPath and projectPath
+                    // gwt uses camelCase: worktreesPath, projectPath
+                    let matches = {
+                        let mut found = false;
 
-                        let matches = if let Some(ref base_canonical) = base_path_canonical {
-                            if let Ok(wt_canonical) = wt_path.canonicalize() {
-                                base_canonical == &wt_canonical
-                                    || base_canonical.starts_with(&wt_canonical)
-                            } else {
-                                base_path == &wt_path || base_path.starts_with(&wt_path)
-                            }
-                        } else {
-                            base_path == &wt_path || base_path.starts_with(&wt_path)
-                        };
-
-                        if matches {
-                            return Some(path);
+                        // Check worktreesPath
+                        if let Some(serde_json::Value::String(worktrees_path)) =
+                            map.get("worktreesPath")
+                        {
+                            let wt_path = PathBuf::from(worktrees_path);
+                            found = check_path_match(&base_path_canonical, base_path, &wt_path);
                         }
+
+                        // Check projectPath
+                        if !found {
+                            if let Some(serde_json::Value::String(project_path)) =
+                                map.get("projectPath")
+                            {
+                                let proj_path = PathBuf::from(project_path);
+                                found =
+                                    check_path_match(&base_path_canonical, base_path, &proj_path);
+                            }
+                        }
+
+                        found
+                    };
+
+                    if matches {
+                        return Some(path);
                     }
                 }
             }
@@ -615,7 +639,7 @@ fn continue_command(
         .iter()
         .map(|ai_app| {
             let branch_name = format!("{}-{}", branch_prefix, ai_app.as_str());
-            let worktree_path = project_path.join(&branch_name);
+            let worktree_path = worktree_manager.worktrees_path().join(&branch_name);
             (ai_app.clone(), worktree_path.to_string_lossy().to_string())
         })
         .collect();

@@ -1,19 +1,109 @@
 use crate::error::{MultiAiError, Result};
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 pub struct WorktreeManager {
     project_path: PathBuf,
+    worktrees_path: PathBuf,
 }
 
 impl WorktreeManager {
     pub fn new(project_path: PathBuf) -> Self {
-        Self { project_path }
+        let worktrees_path =
+            Self::read_worktrees_path(&project_path).unwrap_or_else(|| project_path.clone());
+        Self {
+            project_path,
+            worktrees_path,
+        }
+    }
+
+    /// Read the worktreesPath from gwt config file
+    fn read_worktrees_path(project_path: &Path) -> Option<PathBuf> {
+        // Try local config first
+        let local_config = project_path.join("git-worktree-config.jsonc");
+        if let Some(path) = Self::parse_worktrees_path_from_file(&local_config) {
+            return Some(path);
+        }
+
+        // Try ./main/ subdirectory
+        let main_config = project_path.join("main").join("git-worktree-config.jsonc");
+        if let Some(path) = Self::parse_worktrees_path_from_file(&main_config) {
+            return Some(path);
+        }
+
+        // Try global gwt configs
+        let home_dir = dirs::home_dir()?;
+        let gwt_projects_dir = home_dir
+            .join(".config")
+            .join("git-worktree-cli")
+            .join("projects");
+        if !gwt_projects_dir.exists() {
+            return None;
+        }
+
+        let project_path_canonical = project_path.canonicalize().ok();
+
+        for entry in std::fs::read_dir(&gwt_projects_dir).ok()?.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "jsonc").unwrap_or(false) {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(Some(serde_json::Value::Object(map))) =
+                        jsonc_parser::parse_to_serde_value(&content, &Default::default())
+                    {
+                        // Check if this config matches our project path
+                        let matches = if let Some(serde_json::Value::String(proj_path)) =
+                            map.get("projectPath")
+                        {
+                            let config_proj_path = PathBuf::from(proj_path);
+                            if let Some(ref proj_canonical) = project_path_canonical {
+                                if let Ok(config_canonical) = config_proj_path.canonicalize() {
+                                    proj_canonical == &config_canonical
+                                } else {
+                                    project_path == &config_proj_path
+                                }
+                            } else {
+                                project_path == &config_proj_path
+                            }
+                        } else {
+                            false
+                        };
+
+                        if matches {
+                            if let Some(serde_json::Value::String(wt_path)) =
+                                map.get("worktreesPath")
+                            {
+                                return Some(PathBuf::from(wt_path));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn parse_worktrees_path_from_file(config_path: &Path) -> Option<PathBuf> {
+        if !config_path.exists() {
+            return None;
+        }
+        let content = std::fs::read_to_string(config_path).ok()?;
+        let parsed = jsonc_parser::parse_to_serde_value(&content, &Default::default()).ok()??;
+        if let serde_json::Value::Object(map) = parsed {
+            if let Some(serde_json::Value::String(wt_path)) = map.get("worktreesPath") {
+                return Some(PathBuf::from(wt_path));
+            }
+        }
+        None
+    }
+
+    pub fn worktrees_path(&self) -> &Path {
+        &self.worktrees_path
     }
 
     pub fn add_worktree(&self, branch_name: &str) -> Result<PathBuf> {
-        let worktree_path = self.project_path.join(branch_name);
+        let worktree_path = self.worktrees_path.join(branch_name);
 
         if !self.has_gwt_cli() {
             return Err(MultiAiError::Worktree(
@@ -175,7 +265,7 @@ impl WorktreeManager {
         // Check if all worktree directories exist for the given branch prefix and AI apps
         ai_app_names.iter().all(|app_name| {
             let branch_name = format!("{}-{}", branch_prefix, app_name);
-            let worktree_path = self.project_path.join(&branch_name);
+            let worktree_path = self.worktrees_path.join(&branch_name);
             worktree_path.exists() && worktree_path.is_dir()
         })
     }
