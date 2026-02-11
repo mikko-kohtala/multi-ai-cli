@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "multi-ai"
-version = "0.20.3"
+version = "0.20.4"
 dependencies = [
  "anyhow",
  "clap",

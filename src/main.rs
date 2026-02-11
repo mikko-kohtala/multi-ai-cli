@@ -467,20 +467,29 @@ fn interactive_remove_command(
         }
     }
 
-    // Remove all worktrees in parallel
+    // Collect unique branch names across all prefix groups to avoid duplicate removals
+    let mut seen = std::collections::HashSet::new();
+    let mut unique_branches: Vec<String> = Vec::new();
+    for (_prefix, branches) in &all_branches {
+        for branch in branches {
+            if seen.insert(branch.clone()) {
+                unique_branches.push(branch.clone());
+            }
+        }
+    }
+
+    // Remove all worktrees in parallel (quiet mode to avoid interleaved output)
     let worktree_manager = Arc::new(worktree_manager);
     let (tx, rx) = mpsc::channel();
 
-    for (_prefix, branches) in &all_branches {
-        for branch_name in branches {
-            let wm = Arc::clone(&worktree_manager);
-            let bn = branch_name.clone();
-            let tx = tx.clone();
-            thread::spawn(move || {
-                let result = wm.remove_worktree(&bn);
-                tx.send((bn, result)).ok();
-            });
-        }
+    for branch_name in &unique_branches {
+        let wm = Arc::clone(&worktree_manager);
+        let bn = branch_name.clone();
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let result = wm.remove_worktree_quiet(&bn);
+            tx.send((bn, result)).ok();
+        });
     }
     drop(tx);
 

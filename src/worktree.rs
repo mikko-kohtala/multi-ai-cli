@@ -184,6 +184,14 @@ impl WorktreeManager {
     }
 
     pub fn remove_worktree(&self, branch_name: &str) -> Result<()> {
+        self.remove_worktree_impl(branch_name, true)
+    }
+
+    pub fn remove_worktree_quiet(&self, branch_name: &str) -> Result<()> {
+        self.remove_worktree_impl(branch_name, false)
+    }
+
+    fn remove_worktree_impl(&self, branch_name: &str, verbose: bool) -> Result<()> {
         if !self.has_gwt_cli() {
             return Err(MultiAiError::Worktree(
                 "gwt CLI is not installed or not in PATH".to_string(),
@@ -195,18 +203,20 @@ impl WorktreeManager {
             .arg(branch_name)
             .arg("--force")
             .current_dir(&self.project_path)
-            .stdout(Stdio::piped())
+            .stdout(if verbose { Stdio::piped() } else { Stdio::null() })
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {
                 MultiAiError::CommandFailed(format!("Failed to execute gwt remove: {}", e))
             })?;
 
-        // Stream stdout
-        if let Some(stdout) = child.stdout.take() {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines().map_while(|r| r.ok()) {
-                println!("    {}", line);
+        // Stream stdout only in verbose mode
+        if verbose {
+            if let Some(stdout) = child.stdout.take() {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines().map_while(|r| r.ok()) {
+                    println!("    {}", line);
+                }
             }
         }
 
