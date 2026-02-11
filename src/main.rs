@@ -629,6 +629,8 @@ fn create_command(
         ))?;
 
     println!("Using config: {}", config_path.display());
+    print!("Validating environment... ");
+    io::stdout().flush().ok();
 
     // Check for git-worktree-config.jsonc (at the project path)
     let _gwt_config_path = find_gwt_config_file(&project_path)
@@ -655,6 +657,8 @@ fn create_command(
             "Current directory is not initialized with gwt. Please ensure git-worktree-config.jsonc exists or run 'gwt init' first.".to_string()
         ));
     }
+
+    println!("ok");
 
     let ai_apps = if let Some(apps) = override_apps {
         apps
@@ -836,6 +840,8 @@ fn remove_command(
         ))?;
 
     println!("Using config: {}", config_path.display());
+    print!("Validating environment... ");
+    io::stdout().flush().ok();
 
     // Check for git-worktree-config.jsonc (at the project path)
     let _gwt_config_path = find_gwt_config_file(&project_path)
@@ -855,6 +861,8 @@ fn remove_command(
             "gwt CLI is not installed. Please install from https://github.com/mikko-kohtala/git-worktree-cli".to_string()
         ));
     }
+
+    println!("ok");
 
     // Determine which worktree branches to remove
     let branch_names: Vec<String> = if !project_config.ai_apps.is_empty() {
@@ -960,6 +968,8 @@ fn continue_command(
         ))?;
 
     println!("Using config: {}", config_path.display());
+    print!("Validating environment... ");
+    io::stdout().flush().ok();
 
     // Check for git-worktree-config.jsonc (at the project path)
     let _gwt_config_path = find_gwt_config_file(&project_path)
@@ -973,6 +983,8 @@ fn continue_command(
         .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
         .to_string();
     let worktree_manager = make_worktree_manager(&project_config, project_path.clone());
+
+    println!("ok");
 
     // Discover worktree paths — use config ai_apps if set, otherwise scan the directory
     let worktree_paths: Vec<(config::AiApp, String)> = if !project_config.ai_apps.is_empty() {
@@ -1136,6 +1148,8 @@ fn review_command(branch: Option<String>) -> Result<()> {
         ))?;
 
     println!("Using config: {}", config_path.display());
+    print!("Validating environment... ");
+    io::stdout().flush().ok();
 
     // Check for gwt config
     let _gwt_config_path = find_gwt_config_file(&project_path)
@@ -1162,6 +1176,8 @@ fn review_command(branch: Option<String>) -> Result<()> {
             "Current directory is not initialized with gwt. Please ensure git-worktree-config.jsonc exists or run 'gwt init' first.".to_string()
         ));
     }
+
+    println!("ok");
 
     review::run_review(project_config, project_name, project_path, worktree_manager, branch)
 }
