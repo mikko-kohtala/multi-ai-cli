@@ -7,7 +7,7 @@ use ratatui::crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
-    backend::{Backend, CrosstermBackend},
+    backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -336,7 +336,7 @@ struct SendAction {
     apps: Vec<AiApp>,
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut TuiState) -> Result<()> {
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &mut TuiState) -> Result<()> {
     loop {
         let _layout_rects = terminal.draw(|f| ui(f, state))
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to draw TUI: {}", e)))?

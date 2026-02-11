@@ -55,20 +55,18 @@ The following files must be discoverable (local or global):
 
 ### Config Discovery
 
-**multi-ai-config.jsonc search order**:
+**multi-ai-config** — all configs live in `~/.config/multi-ai-cli/`, one file per project, named by git remote URL (e.g., `github_com_owner_repo.jsonc`). Discovery:
 
-- Current directory
-- `./main/` subdirectory
-- Parent directories (repeat the two checks at each level)
-- Global configs in the platform config directory (for example, `~/.config/multi-ai-cli/projects/*.jsonc` on Linux) matched by repo URL or `project_path`/`worktrees_path`
+1. Git remote URL → generate filename → look up `~/.config/multi-ai-cli/{filename}.jsonc`
+2. Fallback: scan all `.jsonc` files for matching `project_path` or `worktrees_path`
 
-**git-worktree-config.jsonc search order**:
+Each config requires a `project_path` field pointing to the main git repository. Run `mai init` from your project to create one.
+
+**git-worktree-config.jsonc search order** (managed by gwt):
 
 - Current directory
 - `./main/` subdirectory
 - Global gwt configs in `~/.config/git-worktree-cli/projects/*.jsonc` (matched by repo URL or `worktreesPath`)
-
-This allows you to keep config files version-controlled in a `./main/` subdirectory, or store them globally while keeping worktrees at the repo root level.
 
 ### Setting up multi-ai-config.jsonc
 
@@ -82,6 +80,7 @@ Or create it manually:
 
 ```jsonc
 {
+  "project_path": "/Users/you/code/my-project",
   "terminals_per_column": 2, // Number of terminal panes per column (first is AI command, rest are shells)
   "mode": "iterm2", // Optional: iterm2 | tmux-single-window | tmux-multi-window (defaults: macOS→iterm2, others→tmux-single-window)
   "ai_apps": [
@@ -118,8 +117,8 @@ Or create it manually:
 
 - `terminals_per_column` (optional): Number of terminal panes per column (default: 2). The first pane runs the AI command, additional panes are shell terminals
 - `mode` (optional): One of `"iterm2"`, `"tmux-single-window"`, `"tmux-multi-window"`. Defaults by OS: macOS → `iterm2`; others → `tmux-single-window`. Use CLI `--mode` (or legacy `--tmux`) to override per run.
-- `project_path` (optional): For global configs, the main repo path used for worktree creation and config matching.
-- `worktrees_path` (optional): For global configs, the worktrees root path used for config matching when running inside a worktree.
+- `project_path` (required): Absolute path to the main git repository. Auto-detected by `mai init`.
+- `worktrees_path` (optional): The worktrees root path, used for config matching when running inside a worktree.
 - `ai_apps`: Array of AI applications to configure
   - `name`: The name of the AI tool (used for branch naming)
   - `command`: The full command to launch the AI tool with any flags
@@ -127,7 +126,7 @@ Or create it manually:
 
 ## Usage
 
-**Important**: `mai add`, `mai continue`, `mai resume`, `mai remove`, and `mai send` should be run from within your project (or a worktree). Config discovery searches current/parent directories (including `./main`) and then global config directories.
+**Important**: `mai add`, `mai continue`, `mai resume`, `mai remove`, and `mai send` should be run from within your project (or a worktree). Config is discovered from `~/.config/multi-ai-cli/` using the git remote URL.
 
 ### Create worktrees and terminal sessions
 
@@ -267,23 +266,7 @@ gwt init
 2. Create the configuration file:
 
 ```bash
-mai init  # Interactive setup
-# OR manually create multi-ai-config.jsonc:
-cat > multi-ai-config.jsonc << 'EOF'
-{
-  "mode": "iterm2",
-  "ai_apps": [
-    {
-      "name": "claude",
-      "command": "claude --dangerously-skip-permissions"
-    },
-    {
-      "name": "gemini",
-      "command": "gemini"
-    }
-  ]
-}
-EOF
+mai init  # Interactive setup, saves to ~/.config/multi-ai-cli/
 ```
 
 3. Create AI development environments:

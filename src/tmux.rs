@@ -86,7 +86,7 @@ impl TmuxManager {
                 "-s",
                 &self.session_name,
                 "-n",
-                ai_app.as_str(),
+                &ai_app.slug(),
                 "-c",
                 worktree_path,
             ])
@@ -115,7 +115,7 @@ impl TmuxManager {
                 "-t",
                 &format!("{}:", self.session_name),
                 "-n",
-                ai_app.as_str(),
+                &ai_app.slug(),
                 "-c",
                 worktree_path,
             ])
@@ -145,7 +145,7 @@ impl TmuxManager {
                 "split-window",
                 "-h",
                 "-t",
-                &format!("{}:{}", self.session_name, ai_app.as_str()),
+                &format!("{}:{}", self.session_name, ai_app.slug()),
                 "-c",
                 worktree_path,
                 "-p",
@@ -188,7 +188,7 @@ impl TmuxManager {
             .args([
                 "select-window",
                 "-t",
-                &format!("{}:{}", self.session_name, ai_app.as_str()),
+                &format!("{}:{}", self.session_name, ai_app.slug()),
             ])
             .output()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to select window: {}", e)))?;
@@ -276,7 +276,7 @@ impl TmuxManager {
                 "display-message",
                 "-p",
                 "-t",
-                &format!("{}:{}", self.session_name, ai_app.as_str()),
+                &format!("{}:{}", self.session_name, ai_app.slug()),
                 "#{pane_id}",
             ])
             .output()

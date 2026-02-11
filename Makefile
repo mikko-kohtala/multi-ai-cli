@@ -15,6 +15,13 @@ build:
 
 install: build
 	cargo install --path .
+	@mkdir -p ~/.config/multi-ai-cli
+	@if [ -L ~/.config/multi-ai-cli/apps.jsonc ] || [ ! -e ~/.config/multi-ai-cli/apps.jsonc ]; then \
+		ln -sf $(CURDIR)/apps.jsonc ~/.config/multi-ai-cli/apps.jsonc; \
+		echo "→ Symlinked apps.jsonc to ~/.config/multi-ai-cli/apps.jsonc"; \
+	else \
+		echo "→ ~/.config/multi-ai-cli/apps.jsonc exists (not a symlink), skipping"; \
+	fi
 
 clean:
 	cargo clean

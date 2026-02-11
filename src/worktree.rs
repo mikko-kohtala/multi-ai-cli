@@ -18,6 +18,20 @@ impl WorktreeManager {
         }
     }
 
+    /// Create a WorktreeManager with an explicit worktrees path override.
+    /// The override takes precedence over gwt config discovery.
+    pub fn with_worktrees_path(project_path: PathBuf, worktrees_path: PathBuf) -> Self {
+        Self {
+            project_path,
+            worktrees_path,
+        }
+    }
+
+    /// Read the worktreesPath from gwt config file (public wrapper for init)
+    pub fn read_worktrees_path_public(project_path: &Path) -> Option<PathBuf> {
+        Self::read_worktrees_path(project_path)
+    }
+
     /// Read the worktreesPath from gwt config file
     fn read_worktrees_path(project_path: &Path) -> Option<PathBuf> {
         // Try local config first
@@ -96,6 +110,10 @@ impl WorktreeManager {
             }
         }
         None
+    }
+
+    pub fn project_path(&self) -> &Path {
+        &self.project_path
     }
 
     pub fn worktrees_path(&self) -> &Path {

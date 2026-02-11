@@ -43,16 +43,14 @@ cargo build --release # Release build for production use
 
 ### Run
 
-**Config Discovery**: Config files are searched in this order:
-- Current directory
-- `./main/` subdirectory
-- Parent directories (repeating the above checks at each level)
-- Global configs in the platform config directory (e.g., `~/.config/multi-ai-cli/projects/*.jsonc` on Linux)
+**Config Discovery**: All configs live in `~/.config/multi-ai-cli/`, one file per project, named by git remote URL (e.g., `github_com_owner_repo.jsonc`). Discovery order:
+1. Git remote URL → generate filename → look up `~/.config/multi-ai-cli/{filename}.jsonc`
+2. Fallback: scan all `.jsonc` files for matching `project_path` or `worktrees_path`
 
-This allows you to keep config files version-controlled in a `./main/` subdirectory, or store them globally while maintaining worktrees at the repo root level.
+Each config requires a `project_path` field pointing to the main git repository.
 
 ```bash
-# From a directory with the required config files:
+# From any directory inside a git repo with a config in ~/.config/multi-ai-cli/:
 cargo run -- add <branch-prefix>             # Create worktrees and session
 cargo run -- add <branch-prefix> --tmux      # Use tmux instead of iTerm2
 cargo run -- remove <branch-prefix>          # Remove worktrees and session
@@ -70,7 +68,7 @@ mai resume <branch-prefix>                   # Alias for continue
 mai send                                     # Open TUI to send commands to sessions
 
 # Initialize a new config file:
-mai init                                      # Interactive setup of multi-ai-config.jsonc
+mai init                                      # Interactive setup, saves to ~/.config/multi-ai-cli/
 ```
 
 ### Test
@@ -92,7 +90,7 @@ cargo fmt      # Format code according to Rust standards
 ### Core Flow
 1. **main.rs**: Entry point, handles CLI argument parsing via clap, orchestrates the add/remove commands
    - Commands work from current directory, no project path argument needed
-   - Searches for config files using hierarchical discovery (local, parent directories, global)
+   - Finds config in `~/.config/multi-ai-cli/` by git remote URL or path matching
 2. **config.rs**: Manages project configuration:
    - `ProjectConfig`: Reads `multi-ai-config.jsonc` for AI apps list and `mode`
    - `Mode`: enum for `iterm2`, `tmux-single-window`, `tmux-multi-window` (optional; defaults: macOS → iterm2, others → tmux-single-window)
@@ -124,9 +122,8 @@ cargo fmt      # Format code according to Rust standards
 
 ### Key Implementation Details
 
-- **Hierarchical Config Discovery**: Config files are searched in current directory, `./main/` subdirectory, parent directories, and global config directory
-- **Required Files**: Both `multi-ai-config.jsonc` and `git-worktree-config.jsonc` must exist
-- **Global Config Support**: Configs can be stored in platform config directory (e.g., `~/.config/multi-ai-cli/projects/`) with `project_path` and `worktrees_path` fields specifying target directories
+- **Centralized Config**: All configs live in `~/.config/multi-ai-cli/`, named by git remote URL. Each config requires `project_path`.
+- **Required Files**: Both a mai config in `~/.config/multi-ai-cli/` and `git-worktree-config.jsonc` (managed by gwt) must exist
 - **Tmux Pane Targeting**: Capture `#{pane_id}` of the original pane before splitting and target by ID. This works regardless of `base-index`/`pane-base-index`.
 - **Mode Defaults by OS**: If not specified via CLI or config, defaults to iTerm2 on macOS and tmux single-window elsewhere.
 - **Shell Initialization**: A 500ms delay ensures the shell is ready before sending commands

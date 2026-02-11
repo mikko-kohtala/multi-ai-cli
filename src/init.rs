@@ -1,5 +1,6 @@
 use crate::config::{AiApp, Mode, ProjectConfig};
-use crate::error::Result;
+use crate::error::{MultiAiError, Result};
+use std::path::PathBuf;
 use ratatui::crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
@@ -17,195 +18,11 @@ use std::fs;
 use std::io;
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
-struct CommandVariant {
-    command: &'static str,
-    description: &'static str,
-    is_default: bool,
-}
-
-#[derive(Debug, Clone)]
-struct AiService {
-    name: &'static str,
-    display_name: &'static str,
-    variants: &'static [CommandVariant],
-}
-
-impl AiService {
-    const SERVICES: &'static [AiService] = &[
-        AiService {
-            name: "claude",
-            display_name: "Claude Code",
-            variants: &[
-                CommandVariant {
-                    command: "claude",
-                    description: "Standard mode - asks for permission on all actions",
-                    is_default: true,
-                },
-                CommandVariant {
-                    command: "claude --dangerously-skip-permissions",
-                    description: "Skip all permissions - use with care, no safety checks",
-                    is_default: false,
-                },
-                CommandVariant {
-                    command: "claude --permission-mode plan --allow-dangerously-skip-permissions",
-                    description: "Plan mode with skip option - review first, skip if needed",
-                    is_default: false,
-                },
-            ],
-        },
-        AiService {
-            name: "gemini",
-            display_name: "Gemini CLI",
-            variants: &[
-                CommandVariant {
-                    command: "gemini",
-                    description: "Standard mode - asks for confirmation on actions",
-                    is_default: true,
-                },
-                CommandVariant {
-                    command: "gemini --yolo",
-                    description: "Auto-execute all actions - no confirmation prompts",
-                    is_default: false,
-                },
-            ],
-        },
-        AiService {
-            name: "codex",
-            display_name: "Codex CLI",
-            variants: &[
-                CommandVariant {
-                    command: "codex",
-                    description: "Standard mode - asks for approval on each action",
-                    is_default: true,
-                },
-                CommandVariant {
-                    command: "codex --yolo",
-                    description: "Auto-approve all actions - never asks for approval",
-                    is_default: false,
-                },
-                CommandVariant {
-                    command: "codex --yolo --model gpt-5.1-codex-max --config model_reasoning_effort='high'",
-                    description: "YOLO + max model - highest reasoning with auto-approval",
-                    is_default: false,
-                },
-                CommandVariant {
-                    command: "codex --yolo --model gpt-5.1 --config model_reasoning_effort='high'",
-                    description: "YOLO + base model - high reasoning with auto-approval",
-                    is_default: false,
-                },
-                CommandVariant {
-                    command: "codex --yolo --model gpt-5.1-codex --config model_reasoning_effort='high'",
-                    description: "YOLO + codex model - high reasoning with auto-approval",
-                    is_default: false,
-                },
-            ],
-        },
-        AiService {
-            name: "amp",
-            display_name: "Amp CLI",
-            variants: &[
-                CommandVariant {
-                    command: "amp",
-                    description: "Standard mode - requests permission before changes",
-                    is_default: true,
-                },
-                CommandVariant {
-                    command: "amp --dangerously-allow-all",
-                    description: "Allow all operations - dangerous, bypasses safety",
-                    is_default: false,
-                },
-            ],
-        },
-        AiService {
-            name: "opencode",
-            display_name: "OpenCode CLI",
-            variants: &[
-                CommandVariant {
-                    command: "opencode",
-                    description: "Standard mode - interactive approval workflow",
-                    is_default: true,
-                },
-            ],
-        },
-        AiService {
-            name: "cursor-agent",
-            display_name: "Cursor CLI",
-            variants: &[
-                CommandVariant {
-                    command: "cursor-agent",
-                    description: "Standard mode - asks before executing actions",
-                    is_default: true,
-                },
-                CommandVariant {
-                    command: "cursor-agent --force",
-                    description: "Force mode - executes without confirmation",
-                    is_default: false,
-                },
-            ],
-        },
-        AiService {
-            name: "copilot",
-            display_name: "GitHub Copilot CLI",
-            variants: &[
-                CommandVariant {
-                    command: "copilot",
-                    description: "Standard mode - interactive GitHub Copilot CLI",
-                    is_default: true,
-                },
-                CommandVariant {
-                    command: "copilot --allow-all-tools",
-                    description: "YOLO mode - auto-approve all tool calls",
-                    is_default: false,
-                },
-            ],
-        },
-        AiService {
-            name: "kilo",
-            display_name: "Kilo Code CLI",
-            variants: &[
-                CommandVariant {
-                    command: "kilo",
-                    description: "Standard mode - Kilo Code CLI interface",
-                    is_default: true,
-                },
-            ],
-        },
-        AiService {
-            name: "cline",
-            display_name: "Cline CLI",
-            variants: &[
-                CommandVariant {
-                    command: "cline",
-                    description: "Standard mode - Cline CLI interface",
-                    is_default: true,
-                },
-            ],
-        },
-        AiService {
-            name: "droid",
-            display_name: "Factory CLI",
-            variants: &[
-                CommandVariant {
-                    command: "droid",
-                    description: "Standard mode - Factory CLI (droid) interface",
-                    is_default: true,
-                },
-            ],
-        },
-    ];
-}
+/// The bundled default apps.jsonc content, embedded at compile time.
+const EMBEDDED_APPS_JSONC: &str = include_str!("../apps.jsonc");
 
 #[derive(Clone)]
 enum WizardStep {
-    SelectServices {
-        selected: Vec<bool>,
-        focused: usize,
-    },
-    ConfigureCommand {
-        service_idx: usize,
-        selected_variant: usize,
-    },
     SelectMode {
         selected: usize,
     },
@@ -215,10 +32,10 @@ enum WizardStep {
 struct WizardState {
     current_step: WizardStep,
     history: Vec<WizardStep>,
-    selected_services: Vec<usize>,
-    service_commands: Vec<String>,
     terminal_mode: Mode,
     app_state: AppState,
+    project_path: PathBuf,
+    worktrees_path: Option<PathBuf>,
 }
 
 #[derive(PartialEq)]
@@ -229,18 +46,21 @@ enum AppState {
 }
 
 impl WizardState {
-    fn new() -> Self {
-        Self {
-            current_step: WizardStep::SelectServices {
-                selected: vec![false; AiService::SERVICES.len()],
-                focused: 0,
+    fn new(project_path: PathBuf) -> Result<Self> {
+        // Auto-detect worktrees_path from gwt config
+        let worktrees_path =
+            crate::worktree::WorktreeManager::read_worktrees_path_public(&project_path);
+
+        Ok(Self {
+            current_step: WizardStep::SelectMode {
+                selected: get_default_mode_index(),
             },
             history: Vec::new(),
-            selected_services: Vec::new(),
-            service_commands: Vec::new(),
             terminal_mode: Mode::default_for_platform(),
             app_state: AppState::Running,
-        }
+            project_path,
+            worktrees_path,
+        })
     }
 
     fn next(&mut self, next_step: WizardStep) {
@@ -260,46 +80,34 @@ impl WizardState {
 
     fn step_number(&self) -> (usize, usize) {
         match &self.current_step {
-            WizardStep::SelectServices { .. } => (1, 4),
-            WizardStep::ConfigureCommand { .. } => (2, 4),
-            WizardStep::SelectMode { .. } => (3, 4),
-            WizardStep::Review => (4, 4),
+            WizardStep::SelectMode { .. } => (1, 2),
+            WizardStep::Review => (2, 2),
         }
     }
 
     fn get_config(&self) -> ProjectConfig {
-        let ai_apps: Vec<AiApp> = self
-            .selected_services
-            .iter()
-            .zip(self.service_commands.iter())
-            .map(|(&idx, cmd)| AiApp {
-                name: AiService::SERVICES[idx].name.to_string(),
-                command: cmd.clone(),
-                ultrathink: None,
-            })
-            .collect();
-
         ProjectConfig {
-            ai_apps,
+            ai_apps: Vec::new(),
             terminals_per_column: 2,
             mode: Some(self.terminal_mode.clone()),
-            project_path: None,
-            worktrees_path: None,
+            project_path: Some(self.project_path.clone()),
+            worktrees_path: self.worktrees_path.clone(),
         }
     }
 }
 
-fn get_default_variant_index(service: &AiService) -> usize {
-    service
-        .variants
-        .iter()
-        .position(|v| v.is_default)
-        .unwrap_or(0)
-}
-
 pub fn run_init() -> Result<()> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
+
+    let project_path = crate::git::get_repo_root(&current_dir).ok_or_else(|| {
+        MultiAiError::Config(
+            "Not inside a git repository. Run 'mai init' from within a git repo.".to_string(),
+        )
+    })?;
+
     let mut terminal = setup_terminal()?;
-    let mut wizard = WizardState::new();
+    let mut wizard = WizardState::new(project_path)?;
 
     let result = run_wizard(&mut terminal, &mut wizard);
 
@@ -344,135 +152,44 @@ fn run_wizard(
 }
 
 fn handle_input(wizard: &mut WizardState) -> Result<()> {
-    if event::poll(Duration::from_millis(16))? {
-        if let Event::Key(key) = event::read()? {
-            match key.code {
-                KeyCode::Esc | KeyCode::Left => {
-                    wizard.back();
-                }
-                KeyCode::Enter | KeyCode::Right => validate_and_next(wizard),
-                KeyCode::Up => handle_up(wizard),
-                KeyCode::Down => handle_down(wizard),
-                KeyCode::Char(' ') => handle_space(wizard),
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    wizard.app_state = AppState::Cancelled;
-                }
-                KeyCode::Char('q') => {
-                    wizard.app_state = AppState::Cancelled;
-                }
-                _ => {}
+    if event::poll(Duration::from_millis(16))?
+        && let Event::Key(key) = event::read()?
+    {
+        match key.code {
+            KeyCode::Esc | KeyCode::Left => {
+                wizard.back();
             }
+            KeyCode::Enter | KeyCode::Right => validate_and_next(wizard),
+            KeyCode::Up => handle_up(wizard),
+            KeyCode::Down => handle_down(wizard),
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                wizard.app_state = AppState::Cancelled;
+            }
+            KeyCode::Char('q') => {
+                wizard.app_state = AppState::Cancelled;
+            }
+            _ => {}
         }
     }
     Ok(())
 }
 
 fn handle_up(wizard: &mut WizardState) {
-    match &mut wizard.current_step {
-        WizardStep::SelectServices { focused, .. } => {
-            *focused = focused.saturating_sub(1);
-        }
-        WizardStep::ConfigureCommand {
-            service_idx,
-            selected_variant,
-        } => {
-            let service_idx = wizard.selected_services[*service_idx];
-            let service = &AiService::SERVICES[service_idx];
-            let max = service.variants.len() - 1;
-            *selected_variant = if *selected_variant == 0 {
-                max
-            } else {
-                *selected_variant - 1
-            };
-        }
-        WizardStep::SelectMode { selected } => {
-            let max = get_mode_options().len() - 1;
-            *selected = if *selected == 0 { max } else { *selected - 1 };
-        }
-        _ => {}
+    if let WizardStep::SelectMode { selected } = &mut wizard.current_step {
+        let max = get_mode_options().len() - 1;
+        *selected = if *selected == 0 { max } else { *selected - 1 };
     }
 }
 
 fn handle_down(wizard: &mut WizardState) {
-    match &mut wizard.current_step {
-        WizardStep::SelectServices { focused, selected } => {
-            if *focused < selected.len() - 1 {
-                *focused += 1;
-            }
-        }
-        WizardStep::ConfigureCommand {
-            service_idx,
-            selected_variant,
-        } => {
-            let service_idx = wizard.selected_services[*service_idx];
-            let service = &AiService::SERVICES[service_idx];
-            let max = service.variants.len() - 1;
-            *selected_variant = (*selected_variant + 1) % (max + 1);
-        }
-        WizardStep::SelectMode { selected } => {
-            let max = get_mode_options().len() - 1;
-            *selected = (*selected + 1) % (max + 1);
-        }
-        _ => {}
-    }
-}
-
-fn handle_space(wizard: &mut WizardState) {
-    if let WizardStep::SelectServices { selected, focused } = &mut wizard.current_step {
-        selected[*focused] = !selected[*focused];
+    if let WizardStep::SelectMode { selected } = &mut wizard.current_step {
+        let max = get_mode_options().len() - 1;
+        *selected = (*selected + 1) % (max + 1);
     }
 }
 
 fn validate_and_next(wizard: &mut WizardState) {
     match &wizard.current_step {
-        WizardStep::SelectServices { selected, .. } => {
-            let selected_indices: Vec<usize> = selected
-                .iter()
-                .enumerate()
-                .filter_map(|(i, &sel)| if sel { Some(i) } else { None })
-                .collect();
-
-            if selected_indices.is_empty() {
-                // Show error - for now just do nothing
-                return;
-            }
-
-            wizard.selected_services = selected_indices;
-            wizard.service_commands = Vec::new();
-
-            // Move to first service command configuration
-            let service_idx = wizard.selected_services[0];
-            let service = &AiService::SERVICES[service_idx];
-            wizard.next(WizardStep::ConfigureCommand {
-                service_idx: 0,
-                selected_variant: get_default_variant_index(service),
-            });
-        }
-        WizardStep::ConfigureCommand {
-            service_idx,
-            selected_variant,
-        } => {
-            let service_idx = wizard.selected_services[*service_idx];
-            let service = &AiService::SERVICES[service_idx];
-            let command = service.variants[*selected_variant].command;
-            wizard.service_commands.push(command.to_string());
-
-            let current_config_idx = wizard.service_commands.len();
-            if current_config_idx < wizard.selected_services.len() {
-                // More services to configure
-                let next_service_idx = wizard.selected_services[current_config_idx];
-                let next_service = &AiService::SERVICES[next_service_idx];
-                wizard.next(WizardStep::ConfigureCommand {
-                    service_idx: current_config_idx,
-                    selected_variant: get_default_variant_index(next_service),
-                });
-            } else {
-                // All services configured, move to mode selection
-                wizard.next(WizardStep::SelectMode {
-                    selected: get_default_mode_index(),
-                });
-            }
-        }
         WizardStep::SelectMode { selected } => {
             let modes = get_mode_options();
             wizard.terminal_mode = modes[*selected].clone();
@@ -535,16 +252,6 @@ fn render_header(f: &mut Frame, area: Rect, wizard: &WizardState) {
 
 fn render_content(f: &mut Frame, area: Rect, wizard: &WizardState) {
     match &wizard.current_step {
-        WizardStep::SelectServices { selected, focused } => {
-            render_multiselect(f, area, selected, *focused);
-        }
-        WizardStep::ConfigureCommand {
-            service_idx,
-            selected_variant,
-        } => {
-            let service_idx = wizard.selected_services[*service_idx];
-            render_command_variant(f, area, service_idx, *selected_variant);
-        }
         WizardStep::SelectMode { selected } => {
             render_mode_select(f, area, *selected);
         }
@@ -552,84 +259,6 @@ fn render_content(f: &mut Frame, area: Rect, wizard: &WizardState) {
             render_review(f, area, wizard);
         }
     }
-}
-
-fn render_multiselect(f: &mut Frame, area: Rect, selected: &[bool], focused: usize) {
-    let items: Vec<ListItem> = AiService::SERVICES
-        .iter()
-        .enumerate()
-        .map(|(i, service)| {
-            let checkbox = if selected[i] { "[✓]" } else { "[ ]" };
-            let content = format!(
-                " {}  {:<20}  {}",
-                checkbox, service.display_name, service.name
-            );
-            let style = if i == focused {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Gray)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-            ListItem::new(content).style(style)
-        })
-        .collect();
-
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Select AI Services (Space: toggle, Enter: continue) "),
-    );
-
-    f.render_widget(list, area);
-}
-
-fn render_command_variant(f: &mut Frame, area: Rect, service_idx: usize, selected: usize) {
-    let service = &AiService::SERVICES[service_idx];
-    let title = format!(" Configure {} - Select Command ", service.display_name);
-
-    let items: Vec<ListItem> = service
-        .variants
-        .iter()
-        .enumerate()
-        .map(|(i, variant)| {
-            let radio = if i == selected { "(•)" } else { "( )" };
-            let default_marker = if variant.is_default { " [default]" } else { "" };
-
-            // Two-line format: command + description
-            let content = vec![
-                Line::from(vec![
-                    Span::styled(format!("{} ", radio), Style::default().fg(Color::Cyan)),
-                    Span::styled(
-                        variant.command,
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(default_marker, Style::default().fg(Color::Yellow)),
-                ]),
-                Line::from(format!("    {}", variant.description)),
-            ];
-
-            let style = if i == selected {
-                Style::default().bg(Color::DarkGray)
-            } else {
-                Style::default()
-            };
-
-            ListItem::new(content).style(style)
-        })
-        .collect();
-
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .title_bottom(" ↑/↓: select variant, Enter: confirm "),
-    );
-
-    f.render_widget(list, area);
 }
 
 fn render_mode_select(f: &mut Frame, area: Rect, selected: usize) {
@@ -682,21 +311,19 @@ fn render_review(f: &mut Frame, area: Rect, wizard: &WizardState) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "AI Services:",
+            "Project Path:",
             Style::default().fg(Color::Yellow),
         )),
+        Line::from(format!("  {}", wizard.project_path.display())),
     ];
 
-    for (service_idx, command) in wizard
-        .selected_services
-        .iter()
-        .zip(wizard.service_commands.iter())
-    {
-        let service = &AiService::SERVICES[*service_idx];
-        lines.push(Line::from(format!(
-            "  • {}: {}",
-            service.display_name, command
+    if let Some(ref wt_path) = wizard.worktrees_path {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Worktrees Path:",
+            Style::default().fg(Color::Yellow),
         )));
+        lines.push(Line::from(format!("  {}", wt_path.display())));
     }
 
     lines.push(Line::from(""));
@@ -711,11 +338,16 @@ fn render_review(f: &mut Frame, area: Rect, wizard: &WizardState) {
     };
     lines.push(Line::from(format!("  {}", mode_str)));
 
-    // Add save confirmation prompt
-    lines.push(Line::from(""));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Save configuration to multi-ai-config.jsonc?",
+        "AI tools are configured globally in apps.jsonc (run 'mai apps' to edit)",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    // Add save confirmation prompt
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Save configuration?",
         Style::default()
             .fg(Color::Green)
             .add_modifier(Modifier::BOLD),
@@ -735,14 +367,8 @@ fn render_review(f: &mut Frame, area: Rect, wizard: &WizardState) {
 
 fn render_footer(f: &mut Frame, area: Rect, wizard: &WizardState) {
     let hints = match &wizard.current_step {
-        WizardStep::SelectServices { .. } => {
-            "↑/↓: navigate | Space: toggle | Enter/→: next | ESC/←: cancel | Ctrl+C/q: quit"
-        }
-        WizardStep::ConfigureCommand { .. } => {
-            "↑/↓: select variant | Enter/→: next | ESC/←: back | Ctrl+C/q: quit"
-        }
         WizardStep::SelectMode { .. } => {
-            "↑/↓: select | Enter/→: next | ESC/←: back | Ctrl+C/q: quit"
+            "↑/↓: select | Enter/→: next | ESC/←: cancel | Ctrl+C/q: quit"
         }
         WizardStep::Review => "Enter/→: save | ESC/←: back | Ctrl+C/q: quit",
     };
@@ -755,14 +381,62 @@ fn render_footer(f: &mut Frame, area: Rect, wizard: &WizardState) {
     f.render_widget(footer, area);
 }
 
+pub fn default_apps_content() -> String {
+    EMBEDDED_APPS_JSONC.to_string()
+}
+
+/// Load AI apps from `~/.config/multi-ai-cli/apps.jsonc`.
+/// If the file doesn't exist, falls back to the embedded default.
+pub fn load_apps() -> Result<Vec<AiApp>> {
+    let config_dir = ProjectConfig::config_dir()
+        .map_err(|e| MultiAiError::Config(format!("Could not determine config directory: {}", e)))?;
+    let apps_path = config_dir.join("apps.jsonc");
+
+    let content = if apps_path.exists() {
+        fs::read_to_string(&apps_path)
+            .map_err(|e| MultiAiError::Config(format!("Failed to read apps.jsonc: {}", e)))?
+    } else {
+        EMBEDDED_APPS_JSONC.to_string()
+    };
+
+    let parsed = jsonc_parser::parse_to_serde_value(&content, &Default::default())
+        .map_err(|e| MultiAiError::Config(format!("Failed to parse apps.jsonc: {}", e)))?;
+
+    let value = parsed.ok_or_else(|| MultiAiError::Config("apps.jsonc is empty".to_string()))?;
+
+    let apps: Vec<AiApp> = serde_json::from_value(value)
+        .map_err(|e| MultiAiError::Config(format!("Invalid apps.jsonc format: {}", e)))?;
+
+    Ok(apps)
+}
+
 fn save_config(wizard: &WizardState) -> Result<()> {
     let config = wizard.get_config();
-    let config_path = "multi-ai-config.jsonc";
+
+    let config_dir = ProjectConfig::config_dir()
+        .map_err(|e| MultiAiError::Config(format!("Could not determine config directory: {}", e)))?;
+
+    fs::create_dir_all(&config_dir)?;
+
+    let repo_url = crate::git::get_remote_origin_url(&wizard.project_path).ok_or_else(|| {
+        MultiAiError::Config(
+            "Could not determine git remote URL. Make sure you have a remote named 'origin'."
+                .to_string(),
+        )
+    })?;
+
+    let config_filename = format!(
+        "{}.jsonc",
+        crate::git::generate_config_filename(&repo_url)
+    );
+    let config_path = config_dir.join(&config_filename);
 
     // Check if file exists
-    if fs::metadata(config_path).is_ok() {
-        // File exists, ask for confirmation in normal terminal mode
-        print!("\n{} already exists. Overwrite? [y/n]: ", config_path);
+    if fs::metadata(&config_path).is_ok() {
+        print!(
+            "\n{} already exists. Overwrite? [y/n]: ",
+            config_path.display()
+        );
         io::Write::flush(&mut io::stdout())?;
 
         let mut input = String::new();
@@ -774,42 +448,41 @@ fn save_config(wizard: &WizardState) -> Result<()> {
         }
     }
 
+    let worktrees_line = if let Some(ref wt_path) = wizard.worktrees_path {
+        format!(
+            "\n  \"worktrees_path\": \"{}\",",
+            wt_path.display()
+        )
+    } else {
+        String::new()
+    };
+
     let json_content = format!(
         r#"{{
   // Multi-AI CLI configuration
   // Generated by: mai init
+  // AI tools are configured globally — run 'mai apps' to edit
+  "project_path": "{}",{}
   "terminals_per_column": {},  // Number of terminal panes per column (first is AI command, rest are shells)
-  "mode": "{}",               // Required: iterm2 | tmux-single-window | tmux-multi-window
-  "ai_apps": [{}
-  ]
+  "mode": "{}"                 // iterm2 | tmux-single-window | tmux-multi-window
 }}"#,
+        wizard.project_path.display(),
+        worktrees_line,
         config.terminals_per_column,
         match wizard.terminal_mode {
             Mode::Iterm2 => "iterm2",
             Mode::TmuxMultiWindow => "tmux-multi-window",
             Mode::TmuxSingleWindow => "tmux-single-window",
         },
-        config
-            .ai_apps
-            .iter()
-            .map(|app| format!(
-                r#"
-    {{
-      "name": "{}",
-      "command": "{}"
-    }}"#,
-                app.name, app.command
-            ))
-            .collect::<Vec<_>>()
-            .join(",")
     );
 
-    fs::write(config_path, json_content)?;
-    println!("\n✓ Configuration saved to {}", config_path);
+    fs::write(&config_path, json_content)?;
+    println!("\n✓ Configuration saved to {}", config_path.display());
+    println!("  Project path: {}", wizard.project_path.display());
     println!("\nYou can now run:");
     println!("  mai add <branch-prefix>              # Uses mode from config");
     println!("  mai add <branch-prefix> --mode tmux-single-window  # Override for a single run");
-    println!("  mai add <branch-prefix> --tmux       # Legacy alias for tmux-multi-window");
+    println!("  mai config                           # Open config in editor");
 
     Ok(())
 }

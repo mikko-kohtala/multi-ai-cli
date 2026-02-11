@@ -1,0 +1,127 @@
+// Available AI CLI tools for mai
+// Edit this file to add, remove, or customize tool commands
+// Entries with "default": true are pre-selected in interactive pickers
+// The "slug" field is used for git branch names and worktree directories
+[
+  {
+    "name": "claude",
+    "slug": "claude",
+    "command": "claude",
+    "description": "Standard mode - asks for permission on all actions",
+  },
+  {
+    "name": "claude",
+    "slug": "claude-yolo",
+    "command": "claude --dangerously-skip-permissions",
+    "description": "Skip all permissions - no safety checks",
+  },
+  {
+    "name": "claude",
+    "slug": "claude-plan-yolo",
+    "command": "claude --permission-mode plan --allow-dangerously-skip-permissions",
+    "default": true,
+    "meta_review": true,
+    "description": "Plan mode with skip option - review first, skip if needed",
+  },
+  {
+    "name": "gemini",
+    "slug": "gemini",
+    "command": "gemini",
+    "description": "Standard mode - asks for confirmation on actions",
+  },
+  {
+    "name": "gemini",
+    "slug": "gemini-yolo",
+    "command": "gemini --yolo",
+    "description": "Auto-execute all actions - no confirmation prompts",
+  },
+  {
+    "name": "codex",
+    "slug": "codex",
+    "command": "codex",
+    "description": "Standard mode - asks for approval on each action",
+  },
+  {
+    "name": "codex",
+    "slug": "codex-yolo",
+    "command": "codex --yolo",
+    "description": "Auto-approve all actions - never asks for approval",
+  },
+  {
+    "name": "codex",
+    "slug": "codex-yolo-gpt-5.3-codex",
+    "command": "codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='high'",
+    "default": true,
+    "description": "YOLO + gpt-5.3-codex model - high reasoning with auto-approval",
+  },
+  {
+    "name": "codex",
+    "slug": "codex-yolo-gpt-5.2",
+    "command": "codex --yolo --model gpt-5.2 --config model_reasoning_effort='high'",
+    "description": "YOLO + gpt-5.2 model - high reasoning with auto-approval",
+  },
+  {
+    "name": "amp",
+    "slug": "amp",
+    "command": "amp",
+    "description": "Standard mode - requests permission before changes",
+  },
+  {
+    "name": "amp",
+    "slug": "amp-yolo",
+    "command": "amp --dangerously-allow-all",
+    "default": true,
+    "description": "Allow all operations - bypasses safety checks",
+  },
+  {
+    "name": "opencode",
+    "slug": "opencode",
+    "command": "opencode",
+    "default": true,
+    "description": "Standard mode - interactive approval workflow",
+  },
+  {
+    "name": "cursor-agent",
+    "slug": "cursor-agent",
+    "command": "cursor-agent",
+    "description": "Standard mode - asks before executing actions",
+  },
+  {
+    "name": "cursor-agent",
+    "slug": "cursor-agent-force",
+    "command": "cursor-agent --force",
+    "default": true,
+    "description": "Force mode - executes without confirmation",
+  },
+  {
+    "name": "copilot",
+    "slug": "copilot",
+    "command": "copilot",
+    "description": "Standard mode - interactive GitHub Copilot CLI",
+  },
+  {
+    "name": "copilot",
+    "slug": "copilot-yolo",
+    "command": "copilot --allow-all-tools",
+    "default": true,
+    "description": "YOLO mode - auto-approve all tool calls",
+  },
+  {
+    "name": "kilo",
+    "slug": "kilo",
+    "command": "kilo",
+    "description": "Standard mode - Kilo Code CLI interface",
+  },
+  {
+    "name": "cline",
+    "slug": "cline",
+    "command": "cline",
+    "description": "Standard mode - Cline CLI interface",
+  },
+  {
+    "name": "droid",
+    "slug": "droid",
+    "command": "droid",
+    "description": "Standard mode - Factory CLI (droid) interface",
+  },
+]
