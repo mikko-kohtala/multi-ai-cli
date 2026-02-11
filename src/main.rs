@@ -17,7 +17,7 @@ use error::{MultiAiError, Result};
 use iterm2::ITerm2Manager;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 use tmux::TmuxManager;
@@ -387,6 +387,11 @@ fn interactive_remove_command(
             "Config not found in ~/.config/multi-ai-cli/. Run 'mai init' from your project directory to create one.".to_string()
         ))?;
 
+    let project_name = project_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
     let worktree_manager = make_worktree_manager(&project_config, project_path);
 
     let prefix_groups = discover_all_prefixes(&worktree_manager, &project_config);
@@ -407,9 +412,93 @@ fn interactive_remove_command(
         return Ok(());
     }
 
+    // Gather all worktree branch names for a single combined confirmation
+    let mut all_branches: Vec<(String, Vec<String>)> = Vec::new();
     for prefix in &selected {
-        println!("\n--- Removing '{}' ---", prefix);
-        remove_command(prefix.clone(), cli_tmux, mode_override, force)?;
+        let branches: Vec<String> = if !project_config.ai_apps.is_empty() {
+            project_config
+                .ai_apps
+                .iter()
+                .map(|app| format!("{}-{}", prefix, app.slug()))
+                .collect()
+        } else {
+            discover_worktree_branches(&worktree_manager, prefix)
+        };
+        all_branches.push((prefix.clone(), branches));
+    }
+
+    // Determine mode for display
+    let mut mode = mode_override.map(Into::into);
+    if mode.is_none() && cli_tmux {
+        mode = Some(Mode::TmuxMultiWindow);
+    }
+    if mode.is_none() {
+        mode = project_config.mode.clone();
+    }
+
+    // Show combined confirmation
+    if !force {
+        println!("⚠️  You are about to remove:");
+        for (prefix, branches) in &all_branches {
+            println!("  [{}]", prefix);
+            for branch in branches {
+                println!("    • {}", branch);
+            }
+            match mode {
+                Some(Mode::TmuxMultiWindow) | Some(Mode::TmuxSingleWindow) => {
+                    println!("    ⊘ tmux session: {}-{}", project_name, prefix);
+                }
+                _ => {}
+            }
+        }
+        println!();
+        if !ask_confirmation("Are you sure you want to remove these worktrees and sessions?")? {
+            println!("Removal cancelled.");
+            return Ok(());
+        }
+    }
+
+    // Kill tmux sessions first (fast, sequential)
+    for prefix in &selected {
+        let tmux_manager = TmuxManager::new(&project_name, prefix);
+        match tmux_manager.kill_session() {
+            Ok(_) => println!("  ✓ Tmux session '{}-{}' removed or not present", project_name, prefix),
+            Err(e) => eprintln!("  ⚠ Tmux session '{}-{}' cleanup: {}", project_name, prefix, e),
+        }
+    }
+
+    // Remove all worktrees in parallel
+    let worktree_manager = Arc::new(worktree_manager);
+    let (tx, rx) = mpsc::channel();
+
+    for (_prefix, branches) in &all_branches {
+        for branch_name in branches {
+            let wm = Arc::clone(&worktree_manager);
+            let bn = branch_name.clone();
+            let tx = tx.clone();
+            thread::spawn(move || {
+                let result = wm.remove_worktree(&bn);
+                tx.send((bn, result)).ok();
+            });
+        }
+    }
+    drop(tx);
+
+    let mut failed = false;
+    for (branch_name, result) in rx {
+        match result {
+            Ok(_) => println!("  ✓ Removed worktree: {}", branch_name),
+            Err(e) => {
+                eprintln!("  ✗ Failed to remove worktree {}: {}", branch_name, e);
+                failed = true;
+            }
+        }
+    }
+
+    if failed {
+        println!("\n⚠ Cleanup completed with errors.");
+    } else {
+        println!("\n✓ Cleanup completed!");
     }
 
     Ok(())
