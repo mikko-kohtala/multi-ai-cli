@@ -13,13 +13,14 @@ mod worktree;
 use clap::{Parser, ValueEnum};
 use config::{Mode, ProjectConfig, TmuxLayout};
 use error::{MultiAiError, Result};
+use indicatif::{ProgressBar, ProgressStyle};
 #[cfg(target_os = "macos")]
 use iterm2::ITerm2Manager;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tmux::TmuxManager;
 use worktree::WorktreeManager;
 
@@ -629,8 +630,7 @@ fn create_command(
         ))?;
 
     println!("Using config: {}", config_path.display());
-    print!("Validating environment... ");
-    io::stdout().flush().ok();
+    let sp = spinner("Validating environment...");
 
     // Check for git-worktree-config.jsonc (at the project path)
     let _gwt_config_path = find_gwt_config_file(&project_path)
@@ -658,7 +658,7 @@ fn create_command(
         ));
     }
 
-    println!("ok");
+    sp.finish_with_message("Environment validated");
 
     let ai_apps = if let Some(apps) = override_apps {
         apps
@@ -678,6 +678,25 @@ fn create_command(
         branch_prefix = result.env_name;
         result.selected_apps
     };
+
+    // Fetch once before parallel worktree creation to avoid concurrent fetch race conditions
+    // (gwt internally fetches, and parallel fetches race to update the same remote refs)
+    print!("Fetching latest changes from origin... ");
+    io::stdout().flush().ok();
+    match std::process::Command::new("git")
+        .args(["fetch", "origin"])
+        .current_dir(&project_path)
+        .output()
+    {
+        Ok(output) if output.status.success() => println!("ok"),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("warning: git fetch failed: {}", stderr.trim());
+        }
+        Err(e) => {
+            eprintln!("warning: could not run git fetch: {}", e);
+        }
+    }
 
     // Create worktrees in parallel
     println!("Creating worktrees in parallel...");
@@ -840,8 +859,7 @@ fn remove_command(
         ))?;
 
     println!("Using config: {}", config_path.display());
-    print!("Validating environment... ");
-    io::stdout().flush().ok();
+    let sp = spinner("Validating environment...");
 
     // Check for git-worktree-config.jsonc (at the project path)
     let _gwt_config_path = find_gwt_config_file(&project_path)
@@ -862,7 +880,7 @@ fn remove_command(
         ));
     }
 
-    println!("ok");
+    sp.finish_with_message("Environment validated");
 
     // Determine which worktree branches to remove
     let branch_names: Vec<String> = if !project_config.ai_apps.is_empty() {
@@ -968,8 +986,7 @@ fn continue_command(
         ))?;
 
     println!("Using config: {}", config_path.display());
-    print!("Validating environment... ");
-    io::stdout().flush().ok();
+    let sp = spinner("Validating environment...");
 
     // Check for git-worktree-config.jsonc (at the project path)
     let _gwt_config_path = find_gwt_config_file(&project_path)
@@ -984,7 +1001,7 @@ fn continue_command(
         .to_string();
     let worktree_manager = make_worktree_manager(&project_config, project_path.clone());
 
-    println!("ok");
+    sp.finish_with_message("Environment validated");
 
     // Discover worktree paths — use config ai_apps if set, otherwise scan the directory
     let worktree_paths: Vec<(config::AiApp, String)> = if !project_config.ai_apps.is_empty() {
@@ -1148,8 +1165,7 @@ fn review_command(branch: Option<String>) -> Result<()> {
         ))?;
 
     println!("Using config: {}", config_path.display());
-    print!("Validating environment... ");
-    io::stdout().flush().ok();
+    let sp = spinner("Validating environment...");
 
     // Check for gwt config
     let _gwt_config_path = find_gwt_config_file(&project_path)
@@ -1177,7 +1193,7 @@ fn review_command(branch: Option<String>) -> Result<()> {
         ));
     }
 
-    println!("ok");
+    sp.finish_with_message("Environment validated");
 
     review::run_review(project_config, project_name, project_path, worktree_manager, branch)
 }
@@ -1332,6 +1348,19 @@ fn apps_command() -> Result<()> {
         .map_err(|e| MultiAiError::Config(format!("Failed to open apps config file: {}", e)))?;
 
     Ok(())
+}
+
+fn spinner(msg: &str) -> ProgressBar {
+    let sp = ProgressBar::new_spinner();
+    sp.set_style(
+        ProgressStyle::default_spinner()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✓"])
+            .template("{spinner:.cyan} {msg}")
+            .unwrap(),
+    );
+    sp.set_message(msg.to_string());
+    sp.enable_steady_tick(Duration::from_millis(80));
+    sp
 }
 
 fn ask_confirmation(question: &str) -> Result<bool> {
