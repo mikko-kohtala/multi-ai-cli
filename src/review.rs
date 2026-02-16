@@ -4,12 +4,15 @@ use crate::git::{self, BranchInfo};
 use crate::init;
 use crate::worktree::WorktreeManager;
 use ratatui::crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers,
-            KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
+    event::{
+        self, Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute, queue,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -18,7 +21,6 @@ use ratatui::{
         Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
         ScrollbarState, Wrap,
     },
-    Frame, Terminal,
 };
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -42,9 +44,6 @@ struct SelectedTool {
     service_index: usize,
     tag: ReviewTag,
 }
-
-const DEFAULT_REVIEW_PROMPT: &str =
-    "Review changes in this branch against the base branch. Once done with the review, write findings to REVIEW.md";
 
 // ---------------------------------------------------------------------------
 // Wizard state
@@ -126,8 +125,13 @@ struct ReviewWizardState {
 }
 
 impl ReviewWizardState {
-    fn new(branches: Vec<BranchInfo>, branch: Option<&str>) -> Self {
+    fn new(
+        branches: Vec<BranchInfo>,
+        branch: Option<&str>,
+        settings: &crate::config::Settings,
+    ) -> Self {
         let review_services = init::load_apps().unwrap_or_default();
+        let default_prompt = settings.review_prompt.clone();
 
         // If a branch argument was given and matches exactly, skip to Configure
         if let Some(b) = branch {
@@ -147,7 +151,7 @@ impl ReviewWizardState {
                 let meta_selected: Vec<bool> =
                     review_services.iter().map(|a| a.meta_review).collect();
 
-                let prompt = DEFAULT_REVIEW_PROMPT.to_string();
+                let prompt = default_prompt.clone();
                 let len = prompt.len();
                 return Self {
                     current_step: ReviewStep::Configure {
@@ -165,7 +169,7 @@ impl ReviewWizardState {
                     review_services,
                     source_branch,
                     source_branch_ref,
-                    review_prompt: DEFAULT_REVIEW_PROMPT.to_string(),
+                    review_prompt: default_prompt,
                     send_prompts: true,
                     selected_tools: Vec::new(),
                 };
@@ -183,7 +187,7 @@ impl ReviewWizardState {
             review_services,
             source_branch: String::new(),
             source_branch_ref: String::new(),
-            review_prompt: DEFAULT_REVIEW_PROMPT.to_string(),
+            review_prompt: default_prompt,
             send_prompts: true,
             selected_tools: Vec::new(),
         }
@@ -292,17 +296,20 @@ pub fn run_review(
     branch: Option<String>,
     config_path: &Path,
 ) -> Result<()> {
-    // 1. Fetch branches (may involve network I/O) before entering TUI
+    // 1. Load settings
+    let settings = init::load_settings()?;
+
+    // 2. Fetch branches (may involve network I/O) before entering TUI
     print!("Fetching branches...");
     io::stdout().flush().ok();
     let branches = git::list_all_branches(&project_path);
     println!(" {} branches found.", branches.len());
 
-    // 2. Run TUI wizard
-    let (mut terminal, kbd_enhanced) = setup_terminal()?;
-    let mut wizard = ReviewWizardState::new(branches, branch.as_deref());
+    // 3. Run TUI wizard
+    let (mut terminal, keyboard_enhancement_enabled) = setup_terminal()?;
+    let mut wizard = ReviewWizardState::new(branches, branch.as_deref(), &settings);
     let result = run_wizard(&mut terminal, &mut wizard);
-    cleanup_terminal(&mut terminal, kbd_enhanced)?;
+    cleanup_terminal(&mut terminal, keyboard_enhancement_enabled)?;
 
     result?;
 
@@ -311,12 +318,12 @@ pub fn run_review(
         return Ok(());
     }
 
-    // 2. Generate branch prefix
+    // 4. Generate branch prefix
     let branch_prefix =
         generate_review_prefix(worktree_manager.worktrees_path(), &wizard.source_branch);
     println!("Review prefix: {}", branch_prefix);
 
-    // 3. Build AiApp list
+    // 5. Build AiApp list
     let review_apps: Vec<AiApp> = wizard
         .selected_tools
         .iter()
@@ -338,7 +345,7 @@ pub fn run_review(
         })
         .collect();
 
-    // 4. Create worktrees in parallel
+    // 6. Create worktrees in parallel
     println!("Creating review worktrees...");
     let worktree_paths = create_review_worktrees(
         &worktree_manager,
@@ -348,7 +355,7 @@ pub fn run_review(
     )?;
     println!("All review worktrees created.");
 
-    // 5. Build review & meta prompts
+    // 7. Build review & meta prompts
     let review_prompt = &wizard.review_prompt;
 
     // Build review locations for meta prompt
@@ -362,15 +369,11 @@ pub fn run_review(
         }
     }
     let meta_prompt = if !review_locations.is_empty() {
-        Some(format!(
-            "Your task is to review the code reviews made by other AI tools. \
-             You will find the review markdown files from these locations:\n\
-             {}\n\n\
-             Please wait for the REVIEW.md files to appear, then read all of the reviews, \
-             and create a comprehensive summary of the review results. You can investigate the repo and review results if needed. Use sub-agents if needed.\n\n\
-             Once you are done, create REVIEW_SUMMARY.md with your consolidated findings.",
-            review_locations.join("\n")
-        ))
+        Some(
+            settings
+                .meta_prompt_template
+                .replace("{{review_locations}}", &review_locations.join("\n")),
+        )
     } else {
         None
     };
@@ -408,7 +411,7 @@ fn setup_terminal() -> Result<(Terminal<CrosstermBackend<io::Stdout>>, bool)> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
 
-    // Enable keyboard enhancement protocol for proper Shift+Enter detection
+    // Enable keyboard enhancement so Shift+Enter is reported with modifiers.
     let mut keyboard_enhancement_enabled = false;
     if matches!(
         ratatui::crossterm::terminal::supports_keyboard_enhancement(),
@@ -467,6 +470,10 @@ fn handle_input(wizard: &mut ReviewWizardState) -> Result<()> {
     if event::poll(Duration::from_millis(16))?
         && let Event::Key(key) = event::read()?
     {
+        if key.kind != KeyEventKind::Press {
+            return Ok(());
+        }
+
         // Global quit
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             wizard.app_state = AppState::Cancelled;
@@ -475,9 +482,7 @@ fn handle_input(wizard: &mut ReviewWizardState) -> Result<()> {
 
         match &mut wizard.current_step {
             ReviewStep::SelectBranch { .. } => handle_branch_input(wizard, key.code),
-            ReviewStep::Configure { .. } => {
-                handle_configure_input(wizard, key.code, key.modifiers)
-            }
+            ReviewStep::Configure { .. } => handle_configure_input(wizard, key.code, key.modifiers),
         }
     }
     Ok(())
@@ -614,6 +619,12 @@ fn handle_configure_input(wizard: &mut ReviewWizardState, key: KeyCode, modifier
         return;
     }
 
+    // In prompt editor, newline comes from Shift+Enter or fallback keys.
+    if *focus == ConfigSection::Prompt && is_prompt_newline_key(key, modifiers) {
+        insert_prompt_newline(prompt_text, prompt_cursor);
+        return;
+    }
+
     // Enter: start review (from any section except Prompt)
     if key == KeyCode::Enter && *focus != ConfigSection::Prompt {
         let any_ai = ai_selected.iter().any(|&s| s);
@@ -654,7 +665,7 @@ fn handle_configure_input(wizard: &mut ReviewWizardState, key: KeyCode, modifier
 
     match focus {
         ConfigSection::Prompt => {
-            handle_prompt_keys(prompt_text, prompt_cursor, key, modifiers);
+            handle_prompt_keys(prompt_text, prompt_cursor, key);
         }
         ConfigSection::SendPrompts => {
             if key == KeyCode::Char(' ') {
@@ -692,17 +703,25 @@ fn handle_configure_input(wizard: &mut ReviewWizardState, key: KeyCode, modifier
     }
 }
 
-fn handle_prompt_keys(
-    text: &mut String,
-    cursor: &mut usize,
-    key: KeyCode,
-    modifiers: KeyModifiers,
-) {
+fn is_prompt_newline_key(key: KeyCode, modifiers: KeyModifiers) -> bool {
     match key {
-        KeyCode::Enter if modifiers.contains(KeyModifiers::SHIFT) => {
-            text.insert(*cursor, '\n');
-            *cursor += 1;
+        KeyCode::Enter => {
+            modifiers.contains(KeyModifiers::SHIFT) || modifiers.contains(KeyModifiers::ALT)
         }
+        KeyCode::Char('\n') | KeyCode::Char('\r') => true,
+        // Common fallback when terminals can't send Shift+Enter directly.
+        KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => true,
+        _ => false,
+    }
+}
+
+fn insert_prompt_newline(text: &mut String, cursor: &mut usize) {
+    text.insert(*cursor, '\n');
+    *cursor += 1;
+}
+
+fn handle_prompt_keys(text: &mut String, cursor: &mut usize, key: KeyCode) {
+    match key {
         KeyCode::Backspace => {
             if *cursor > 0 {
                 let prev = text[..*cursor]
@@ -918,7 +937,7 @@ fn render_configure(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
         .constraints([
             Constraint::Length(5), // Prompt
             Constraint::Length(3), // Send prompts toggle
-            Constraint::Min(0),   // AI Reviewers + Meta Reviewer side by side
+            Constraint::Min(0),    // AI Reviewers + Meta Reviewer side by side
         ])
         .split(area);
 
@@ -1210,10 +1229,7 @@ fn create_review_worktrees(
                                 worktree_path.display()
                             );
                             let mut paths = worktree_paths_clone.lock().unwrap();
-                            paths.push((
-                                ai_app_clone,
-                                worktree_path.to_string_lossy().to_string(),
-                            ));
+                            paths.push((ai_app_clone, worktree_path.to_string_lossy().to_string()));
                         }
                         Ok(output) => {
                             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1321,9 +1337,7 @@ tell application "iTerm"
     // --- Create vertical splits for columns ---
     for i in 2..=num_apps {
         if i == 2 {
-            script.push_str(
-                "\n            set col2 to (split vertically with default profile)",
-            );
+            script.push_str("\n            set col2 to (split vertically with default profile)");
         } else {
             script.push_str(&format!(
                 "\n            tell col{}\n                set col{} to (split vertically with default profile)\n            end tell",
@@ -1334,9 +1348,7 @@ tell application "iTerm"
 
     // --- Create horizontal splits for shell panes ---
     // Column 1 (current session)
-    script.push_str(
-        "\n            set col1Shell to (split horizontally with default profile)",
-    );
+    script.push_str("\n            set col1Shell to (split horizontally with default profile)");
     // Other columns
     for i in 2..=num_apps {
         script.push_str(&format!(
