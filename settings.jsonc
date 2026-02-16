@@ -1,0 +1,10 @@
+// Global settings for mai (Multi-AI CLI)
+// Edit review prompts and other global settings here
+{
+  // Prompt sent to each AI reviewer tool
+  "review_prompt": "Review changes in this branch against the base branch. Once done with the review, write findings to REVIEW.md",
+
+  // Template for the meta reviewer prompt
+  // {{review_locations}} is replaced with the list of REVIEW.md file paths at runtime
+  "meta_prompt_template": "Your task is to review the code reviews made by other AI tools. You will find the review markdown files from these locations:\n{{review_locations}}\n\nPlease wait for the REVIEW.md files to appear, then read all of the reviews, and create a comprehensive summary of the review results. You can investigate the repo and review results if needed. Use sub-agents if needed.\n\nOnce you are done, create two files:\n1. REVIEW_SUMMARY.md — consolidated findings including which AI tool made each observation\n2. REVIEW_SUMMARY_UNIFIED.md — unified review without any app-specific attribution, presenting findings as a single cohesive review"
+}

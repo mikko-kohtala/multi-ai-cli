@@ -203,7 +203,11 @@ impl WorktreeManager {
             .arg(branch_name)
             .arg("--force")
             .current_dir(&self.project_path)
-            .stdout(if verbose { Stdio::piped() } else { Stdio::null() })
+            .stdout(if verbose {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {

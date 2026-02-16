@@ -18,7 +18,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use iterm2::ITerm2Manager;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime};
 use tmux::TmuxManager;
@@ -214,7 +214,9 @@ fn main() -> Result<()> {
         Some(Command::Config) => config_command(),
         Some(Command::Apps) => apps_command(),
         None => {
-            eprintln!("Error: Command required. Use 'mai add <branch-prefix>' or 'mai remove <branch-prefix>'");
+            eprintln!(
+                "Error: Command required. Use 'mai add <branch-prefix>' or 'mai remove <branch-prefix>'"
+            );
             eprintln!("Run 'mai --help' for more information.");
             std::process::exit(1);
         }
@@ -253,7 +255,10 @@ fn find_gwt_config_file(base_path: &Path) -> Option<PathBuf> {
 
     // Check global gwt configs - gwt uses ~/.config/ not the platform config dir
     let home_dir = dirs::home_dir()?;
-    let gwt_projects_dir = home_dir.join(".config").join("git-worktree-cli").join("projects");
+    let gwt_projects_dir = home_dir
+        .join(".config")
+        .join("git-worktree-cli")
+        .join("projects");
     if !gwt_projects_dir.exists() {
         return None;
     }
@@ -331,10 +336,7 @@ fn find_gwt_config_file(base_path: &Path) -> Option<PathBuf> {
 }
 
 /// Create a WorktreeManager, using the mai config's worktrees_path if set.
-fn make_worktree_manager(
-    project_config: &ProjectConfig,
-    project_path: PathBuf,
-) -> WorktreeManager {
+fn make_worktree_manager(project_config: &ProjectConfig, project_path: PathBuf) -> WorktreeManager {
     if let Some(ref wt_path) = project_config.worktrees_path {
         WorktreeManager::with_worktrees_path(project_path, wt_path.clone())
     } else {
@@ -345,7 +347,10 @@ fn make_worktree_manager(
 /// Discover worktree branch names matching a prefix by scanning the worktrees directory.
 /// Returns directory names like ["test01-claude", "test01-gemini-yolo"].
 /// Also includes a standalone worktree whose name equals the prefix exactly.
-fn discover_worktree_branches(worktree_manager: &WorktreeManager, branch_prefix: &str) -> Vec<String> {
+fn discover_worktree_branches(
+    worktree_manager: &WorktreeManager,
+    branch_prefix: &str,
+) -> Vec<String> {
     let wt_dir = worktree_manager.worktrees_path();
     let prefix_dash = format!("{}-", branch_prefix);
     let mut branches: Vec<String> = collect_worktree_entries(wt_dir)
@@ -356,10 +361,7 @@ fn discover_worktree_branches(worktree_manager: &WorktreeManager, branch_prefix:
     branches
 }
 
-fn interactive_add_command(
-    cli_tmux: bool,
-    mode_override: Option<ModeOverride>,
-) -> Result<()> {
+fn interactive_add_command(cli_tmux: bool, mode_override: Option<ModeOverride>) -> Result<()> {
     let result = picker::run_app_picker(None)?;
     let Some(result) = result else {
         println!("Cancelled.");
@@ -371,7 +373,12 @@ fn interactive_add_command(
         return Ok(());
     }
 
-    create_command(result.env_name, cli_tmux, mode_override, Some(result.selected_apps))
+    create_command(
+        result.env_name,
+        cli_tmux,
+        mode_override,
+        Some(result.selected_apps),
+    )
 }
 
 fn interactive_remove_command(
@@ -463,8 +470,14 @@ fn interactive_remove_command(
     for prefix in &selected {
         let tmux_manager = TmuxManager::new(&project_name, prefix);
         match tmux_manager.kill_session() {
-            Ok(_) => println!("  ✓ Tmux session '{}-{}' removed or not present", project_name, prefix),
-            Err(e) => eprintln!("  ⚠ Tmux session '{}-{}' cleanup: {}", project_name, prefix, e),
+            Ok(_) => println!(
+                "  ✓ Tmux session '{}-{}' removed or not present",
+                project_name, prefix
+            ),
+            Err(e) => eprintln!(
+                "  ⚠ Tmux session '{}-{}' cleanup: {}",
+                project_name, prefix, e
+            ),
         }
     }
 
@@ -599,10 +612,7 @@ fn discover_all_prefixes(
         }
         if !matched {
             // Standalone worktree not matching any known slug
-            prefix_map
-                .entry(name.clone())
-                .or_default()
-                .push(name);
+            prefix_map.entry(name.clone()).or_default().push(name);
         }
     }
 
@@ -1041,7 +1051,9 @@ fn continue_command(
         branch_names
             .iter()
             .map(|branch_name| {
-                let slug = branch_name.strip_prefix(&prefix_dash).unwrap_or(branch_name);
+                let slug = branch_name
+                    .strip_prefix(&prefix_dash)
+                    .unwrap_or(branch_name);
                 let app = all_apps
                     .iter()
                     .find(|a| a.slug() == slug)
@@ -1100,7 +1112,8 @@ fn continue_command(
                     "  Terminals per column: {}",
                     project_config.terminals_per_column
                 );
-                let ai_apps: Vec<config::AiApp> = worktree_paths.iter().map(|(app, _)| app.clone()).collect();
+                let ai_apps: Vec<config::AiApp> =
+                    worktree_paths.iter().map(|(app, _)| app.clone()).collect();
                 match iterm2_manager.create_tabs_per_app(&ai_apps, &worktree_paths) {
                     Ok(_) => println!("✓ iTerm2 tab created successfully!"),
                     Err(e) => {
@@ -1120,7 +1133,8 @@ fn continue_command(
                 "\nCreating new tmux session '{}-{}' (layout: {:?})...",
                 project_name, branch_prefix, layout
             );
-            let ai_apps: Vec<config::AiApp> = worktree_paths.iter().map(|(app, _)| app.clone()).collect();
+            let ai_apps: Vec<config::AiApp> =
+                worktree_paths.iter().map(|(app, _)| app.clone()).collect();
             tmux_manager.create_session(&ai_apps, &worktree_paths, layout)?;
             println!("✓ Tmux session created successfully!");
             println!("\nAttaching to session...");
@@ -1202,7 +1216,14 @@ fn review_command(branch: Option<String>) -> Result<()> {
 
     sp.finish_with_message("Environment validated");
 
-    review::run_review(project_config, project_name, project_path, worktree_manager, branch, &config_path)
+    review::run_review(
+        project_config,
+        project_name,
+        project_path,
+        worktree_manager,
+        branch,
+        &config_path,
+    )
 }
 
 fn review_input_command() -> Result<()> {
@@ -1294,7 +1315,11 @@ fn list_command() -> Result<()> {
     timed_groups.sort_by(|a, b| b.2.cmp(&a.2));
 
     // Find max prefix length for alignment
-    let max_prefix_len = timed_groups.iter().map(|(p, _, _)| p.len()).max().unwrap_or(0);
+    let max_prefix_len = timed_groups
+        .iter()
+        .map(|(p, _, _)| p.len())
+        .max()
+        .unwrap_or(0);
 
     for (prefix, worktrees, mtime) in &timed_groups {
         let time_str = format_relative_time(*mtime);
@@ -1348,8 +1373,9 @@ fn config_command() -> Result<()> {
 }
 
 fn apps_command() -> Result<()> {
-    let config_dir = ProjectConfig::config_dir()
-        .map_err(|e| MultiAiError::Config(format!("Could not determine config directory: {}", e)))?;
+    let config_dir = ProjectConfig::config_dir().map_err(|e| {
+        MultiAiError::Config(format!("Could not determine config directory: {}", e))
+    })?;
 
     let apps_path = config_dir.join("apps.jsonc");
 
@@ -1357,15 +1383,17 @@ fn apps_command() -> Result<()> {
         std::fs::create_dir_all(&config_dir)?;
         std::fs::write(&apps_path, init::default_apps_content())?;
         println!("Created default apps config: {}", apps_path.display());
-        println!(
-            "Tip: Run 'make install' from the repo to symlink the repo's apps.jsonc instead."
-        );
+        println!("Tip: Run 'make install' from the repo to symlink the repo's apps.jsonc instead.");
     } else {
         let metadata = std::fs::symlink_metadata(&apps_path);
         if let Ok(m) = metadata {
             if m.file_type().is_symlink() {
                 if let Ok(target) = std::fs::read_link(&apps_path) {
-                    println!("Opening apps config: {} -> {}", apps_path.display(), target.display());
+                    println!(
+                        "Opening apps config: {} -> {}",
+                        apps_path.display(),
+                        target.display()
+                    );
                 } else {
                     println!("Opening apps config: {} (symlink)", apps_path.display());
                 }

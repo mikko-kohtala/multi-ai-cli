@@ -1,18 +1,20 @@
 use crate::config::{AiApp, ProjectConfig};
 use crate::error::{MultiAiError, Result};
 use ratatui::crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
-            KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute, queue,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Frame, Terminal,
 };
 use std::io;
 use std::process::Command;
@@ -35,16 +37,16 @@ struct TuiState {
     input: String,
     // Simple cursor tracking (byte index)
     cursor_position: usize,
-    
+
     sessions: Vec<String>,
     session_list_state: ListState,
-    
+
     apps: Vec<AiApp>,
     app_list_state: ListState,
-    
+
     target_type: TargetType,
     ultrathink: bool,
-    
+
     focused: FocusedWindow,
     confirm_clear: bool,
     settings_list_state: ListState,
@@ -56,12 +58,12 @@ impl TuiState {
         if !sessions.is_empty() {
             session_list_state.select(Some(0));
         }
-        
+
         let mut app_list_state = ListState::default();
         if !apps.is_empty() {
             app_list_state.select(Some(0));
         }
-        
+
         let mut settings_list_state = ListState::default();
         settings_list_state.select(Some(0));
 
@@ -181,12 +183,12 @@ impl TuiState {
             FocusedWindow::Settings => match key {
                 KeyCode::Up => {
                     if let Some(selected) = self.settings_list_state.selected() {
-                         let new_selected = if selected == 0 {
-                             2 // Loop to last item
-                         } else {
-                             selected - 1
-                         };
-                         self.settings_list_state.select(Some(new_selected));
+                        let new_selected = if selected == 0 {
+                            2 // Loop to last item
+                        } else {
+                            selected - 1
+                        };
+                        self.settings_list_state.select(Some(new_selected));
                     }
                 }
                 KeyCode::Down => {
@@ -200,18 +202,18 @@ impl TuiState {
                     }
                 }
                 KeyCode::Char(' ') | KeyCode::Enter => {
-                     if let Some(selected) = self.settings_list_state.selected() {
-                         match selected {
-                             0 => self.target_type = TargetType::Prompt,
-                             1 => self.target_type = TargetType::Command,
-                             2 => self.ultrathink = !self.ultrathink,
-                             _ => {}
-                         }
-                     }
+                    if let Some(selected) = self.settings_list_state.selected() {
+                        match selected {
+                            0 => self.target_type = TargetType::Prompt,
+                            1 => self.target_type = TargetType::Command,
+                            2 => self.ultrathink = !self.ultrathink,
+                            _ => {}
+                        }
+                    }
                 }
                 KeyCode::Tab => self.focused = FocusedWindow::Input,
                 _ => {}
-            }
+            },
         }
     }
 
@@ -270,26 +272,35 @@ pub fn run_send_command(project_config: ProjectConfig, project_name: String) -> 
     // 1. Find active sessions matching the project
     let sessions = find_active_sessions(&project_name)?;
     if sessions.is_empty() {
-        return Err(MultiAiError::Tmux("No active sessions found for this project".to_string()));
+        return Err(MultiAiError::Tmux(
+            "No active sessions found for this project".to_string(),
+        ));
     }
 
     // 2. Setup terminal
-    enable_raw_mode().map_err(|e| MultiAiError::CommandFailed(format!("Failed to enable raw mode: {}", e)))?;
+    enable_raw_mode()
+        .map_err(|e| MultiAiError::CommandFailed(format!("Failed to enable raw mode: {}", e)))?;
     let mut stdout = io::stdout();
 
     // Enable keyboard enhancement protocol for proper Shift+Enter detection
     // This allows terminals to send modifier information with special keys
     let mut keyboard_enhancement_enabled = false;
-    if matches!(ratatui::crossterm::terminal::supports_keyboard_enhancement(), Ok(true)) {
+    if matches!(
+        ratatui::crossterm::terminal::supports_keyboard_enhancement(),
+        Ok(true)
+    ) {
         queue!(
             stdout,
             PushKeyboardEnhancementFlags(
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
             )
-        ).map(|_| keyboard_enhancement_enabled = true)
-        .map_err(|e| MultiAiError::CommandFailed(format!("Failed to enable keyboard enhancement: {}", e)))?;
+        )
+        .map(|_| keyboard_enhancement_enabled = true)
+        .map_err(|e| {
+            MultiAiError::CommandFailed(format!("Failed to enable keyboard enhancement: {}", e))
+        })?;
     }
 
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
@@ -305,7 +316,8 @@ pub fn run_send_command(project_config: ProjectConfig, project_name: String) -> 
     let result = run_app(&mut terminal, &mut state);
 
     // 5. Restore terminal
-    disable_raw_mode().map_err(|_| MultiAiError::CommandFailed("Failed to disable raw mode".to_string()))?;
+    disable_raw_mode()
+        .map_err(|_| MultiAiError::CommandFailed("Failed to disable raw mode".to_string()))?;
 
     if keyboard_enhancement_enabled {
         execute!(
@@ -313,15 +325,19 @@ pub fn run_send_command(project_config: ProjectConfig, project_name: String) -> 
             LeaveAlternateScreen,
             DisableMouseCapture,
             PopKeyboardEnhancementFlags
-        ).map_err(|_| MultiAiError::CommandFailed("Failed to restore terminal".to_string()))?;
+        )
+        .map_err(|_| MultiAiError::CommandFailed("Failed to restore terminal".to_string()))?;
     } else {
         execute!(
             terminal.backend_mut(),
             LeaveAlternateScreen,
             DisableMouseCapture,
-        ).map_err(|_| MultiAiError::CommandFailed("Failed to restore terminal".to_string()))?;
+        )
+        .map_err(|_| MultiAiError::CommandFailed("Failed to restore terminal".to_string()))?;
     }
-    terminal.show_cursor().map_err(|_| MultiAiError::CommandFailed("Failed to show cursor".to_string()))?;
+    terminal
+        .show_cursor()
+        .map_err(|_| MultiAiError::CommandFailed("Failed to show cursor".to_string()))?;
 
     // 6. Handle any errors from the TUI loop
     result
@@ -336,15 +352,23 @@ struct SendAction {
     apps: Vec<AiApp>,
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &mut TuiState) -> Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    state: &mut TuiState,
+) -> Result<()> {
     loop {
-        let _layout_rects = terminal.draw(|f| ui(f, state))
+        let _layout_rects = terminal
+            .draw(|f| ui(f, state))
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to draw TUI: {}", e)))?
             .clone(); // Recalculate on click instead
 
         // Handle events
-        if event::poll(std::time::Duration::from_millis(100)).map_err(|e| MultiAiError::CommandFailed(format!("Poll error: {}", e)))? {
-            match event::read().map_err(|e| MultiAiError::CommandFailed(format!("Read error: {}", e)))? {
+        if event::poll(std::time::Duration::from_millis(100))
+            .map_err(|e| MultiAiError::CommandFailed(format!("Poll error: {}", e)))?
+        {
+            match event::read()
+                .map_err(|e| MultiAiError::CommandFailed(format!("Read error: {}", e)))?
+            {
                 Event::Key(key) => {
                     // Only process key press events, not release (for cross-platform consistency)
                     use ratatui::crossterm::event::KeyEventKind;
@@ -353,7 +377,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &mut Tu
                     }
 
                     // Ctrl+C handling
-                    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    if key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
                         if state.focused == FocusedWindow::Input && !state.input.is_empty() {
                             if state.confirm_clear {
                                 state.input.clear();
@@ -373,21 +399,27 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &mut Tu
                     if state.confirm_clear {
                         state.confirm_clear = false;
                     }
-                    
+
                     if state.focused != FocusedWindow::Input {
-                         if key.code == KeyCode::Char('q') {
-                             return Ok(());
-                         }
+                        if key.code == KeyCode::Char('q') {
+                            return Ok(());
+                        }
                     }
 
                     // Handle Shift+Enter (and common fallbacks) as newline insertion before send logic
-                    let is_newline = state.focused == FocusedWindow::Input && match key.code {
-                        KeyCode::Enter => key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT),
-                        KeyCode::Char('\n') | KeyCode::Char('\r') => true,
-                        // Ctrl+J is a common terminal newline fallback
-                        KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
-                        _ => false,
-                    };
+                    let is_newline = state.focused == FocusedWindow::Input
+                        && match key.code {
+                            KeyCode::Enter => {
+                                key.modifiers.contains(KeyModifiers::SHIFT)
+                                    || key.modifiers.contains(KeyModifiers::ALT)
+                            }
+                            KeyCode::Char('\n') | KeyCode::Char('\r') => true,
+                            // Ctrl+J is a common terminal newline fallback
+                            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                true
+                            }
+                            _ => false,
+                        };
                     if is_newline {
                         state.insert_newline();
                         continue;
@@ -417,7 +449,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &mut Tu
                 }
                 Event::Mouse(mouse) => {
                     if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
-                        let size = terminal.size()
+                        let size = terminal
+                            .size()
                             .map(|s| Rect::from((Position::default(), s)))
                             .unwrap_or(Rect::default());
                         let rects = calculate_layout(size);
@@ -433,10 +466,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &mut Tu
 fn calculate_layout(area: Rect) -> LayoutRects {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(60), // Input takes top 60%
-            Constraint::Percentage(40), // Bottom area
-        ].as_ref())
+        .constraints(
+            [
+                Constraint::Percentage(60), // Input takes top 60%
+                Constraint::Percentage(40), // Bottom area
+            ]
+            .as_ref(),
+        )
         .split(area);
 
     let input_area = chunks[0];
@@ -445,10 +481,13 @@ fn calculate_layout(area: Rect) -> LayoutRects {
     // Split bottom area into two columns: Left (Sessions+Apps) and Right (Settings)
     let bottom_cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50), // Left column
-            Constraint::Percentage(50), // Right column
-        ].as_ref())
+        .constraints(
+            [
+                Constraint::Percentage(50), // Left column
+                Constraint::Percentage(50), // Right column
+            ]
+            .as_ref(),
+        )
         .split(bottom_area);
 
     let left_col = bottom_cols[0];
@@ -457,10 +496,13 @@ fn calculate_layout(area: Rect) -> LayoutRects {
     // Split left column into Sessions (top) and Apps (bottom)
     let left_rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(50), // Sessions
-            Constraint::Percentage(50), // Apps
-        ].as_ref())
+        .constraints(
+            [
+                Constraint::Percentage(50), // Sessions
+                Constraint::Percentage(50), // Apps
+            ]
+            .as_ref(),
+        )
         .split(left_col);
 
     LayoutRects {
@@ -480,24 +522,31 @@ fn ui(f: &mut Frame, state: &mut TuiState) {
     } else {
         " Input (Enter to Send, Shift+Enter for newline) "
     };
-    
+
     let input_block = Block::default()
         .borders(Borders::ALL)
         .title(input_title)
-        .border_style(if state.focused == FocusedWindow::Input { 
-            if state.confirm_clear { Style::default().fg(Color::Red).add_modifier(Modifier::BOLD) }
-            else { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) }
-        } else { Style::default() });
-    
+        .border_style(if state.focused == FocusedWindow::Input {
+            if state.confirm_clear {
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            }
+        } else {
+            Style::default()
+        });
+
     // Handle cursor position logic for multiple lines (not implemented in Paragraph directly)
     // For simplicity, we'll stick with basic rendering but we could add a block cursor character
     // at the cursor position if we wanted to be fancy, but terminal usually handles it if we set cursor position.
-    
+
     let input_text = Paragraph::new(state.input.as_str())
         .block(input_block)
         .wrap(Wrap { trim: false });
     f.render_widget(input_text, rects.input);
-    
+
     // Set cursor position
     if state.focused == FocusedWindow::Input {
         // We need to calculate the screen coordinates of the cursor.
@@ -505,10 +554,11 @@ fn ui(f: &mut Frame, state: &mut TuiState) {
         // For now, let's assume no wrapping or handle simple cases.
         // A better way is to let the user rely on the blinking block cursor if we can position it correctly.
         // But ratatui doesn't easily give us the layout of the text inside the paragraph.
-        
+
         // Let's try a simple approach: Count newlines up to cursor_position.
-        let (cursor_x, cursor_y) = calculate_cursor_pos(&state.input, state.cursor_position, rects.input.width - 2); // -2 for borders
-        
+        let (cursor_x, cursor_y) =
+            calculate_cursor_pos(&state.input, state.cursor_position, rects.input.width - 2); // -2 for borders
+
         f.set_cursor_position(Position::new(
             rects.input.x + 1 + cursor_x,
             rects.input.y + 1 + cursor_y,
@@ -516,55 +566,122 @@ fn ui(f: &mut Frame, state: &mut TuiState) {
     }
 
     // Sessions List
-    let sessions_items: Vec<ListItem> = state.sessions
+    let sessions_items: Vec<ListItem> = state
+        .sessions
         .iter()
         .map(|s| ListItem::new(Line::from(s.as_str())))
         .collect();
-    
+
     let sessions_list = List::new(sessions_items)
-        .block(Block::default().borders(Borders::ALL).title(" Sessions ")
-        .border_style(if state.focused == FocusedWindow::SessionList { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default() }))
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Sessions ")
+                .border_style(if state.focused == FocusedWindow::SessionList {
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )
         .highlight_symbol(">> ");
     f.render_stateful_widget(sessions_list, rects.sessions, &mut state.session_list_state);
 
     // Apps List (Target)
     let mut apps_items = vec![
-        ListItem::new(Line::from("All Tools")).style(Style::default().add_modifier(Modifier::BOLD))
+        ListItem::new(Line::from("All Tools")).style(Style::default().add_modifier(Modifier::BOLD)),
     ];
-    apps_items.extend(state.apps
-        .iter()
-        .map(|a| ListItem::new(Line::from(a.name.as_str()))));
+    apps_items.extend(
+        state
+            .apps
+            .iter()
+            .map(|a| ListItem::new(Line::from(a.name.as_str()))),
+    );
 
     let apps_list = List::new(apps_items)
-        .block(Block::default().borders(Borders::ALL).title(" Target App (Column) ")
-        .border_style(if state.focused == FocusedWindow::AppList { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default() }))
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Target App (Column) ")
+                .border_style(if state.focused == FocusedWindow::AppList {
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )
         .highlight_symbol(">> ");
     f.render_stateful_widget(apps_list, rects.apps, &mut state.app_list_state);
 
     // Settings
     let settings_items = vec![
         ListItem::new(Line::from(vec![
-            Span::styled(if state.target_type == TargetType::Prompt { " (•) " } else { " ( ) " }, Style::default().fg(Color::Cyan)),
+            Span::styled(
+                if state.target_type == TargetType::Prompt {
+                    " (•) "
+                } else {
+                    " ( ) "
+                },
+                Style::default().fg(Color::Cyan),
+            ),
             Span::raw("Target: Prompt (Top Pane)"),
         ])),
         ListItem::new(Line::from(vec![
-            Span::styled(if state.target_type == TargetType::Command { " (•) " } else { " ( ) " }, Style::default().fg(Color::Cyan)),
+            Span::styled(
+                if state.target_type == TargetType::Command {
+                    " (•) "
+                } else {
+                    " ( ) "
+                },
+                Style::default().fg(Color::Cyan),
+            ),
             Span::raw("Target: Command (Bottom Pane)"),
         ])),
         ListItem::new(Line::from(vec![
-            Span::styled(if state.ultrathink { " [x] " } else { " [ ] " }, Style::default().fg(Color::Cyan)),
+            Span::styled(
+                if state.ultrathink { " [x] " } else { " [ ] " },
+                Style::default().fg(Color::Cyan),
+            ),
             Span::raw("Ultrathink"),
         ])),
     ];
 
     let settings_list = List::new(settings_items)
-        .block(Block::default().borders(Borders::ALL).title(" Settings (Space to toggle) ")
-        .border_style(if state.focused == FocusedWindow::Settings { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) } else { Style::default() }))
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::DarkGray))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Settings (Space to toggle) ")
+                .border_style(if state.focused == FocusedWindow::Settings {
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .bg(Color::DarkGray),
+        )
         .highlight_symbol("> ");
-    f.render_stateful_widget(settings_list, rects.settings, &mut state.settings_list_state);
+    f.render_stateful_widget(
+        settings_list,
+        rects.settings,
+        &mut state.settings_list_state,
+    );
 }
 
 fn find_active_sessions(project_name: &str) -> Result<Vec<String>> {
@@ -579,10 +696,7 @@ fn find_active_sessions(project_name: &str) -> Result<Vec<String>> {
     }
 
     let output_str = String::from_utf8_lossy(&output.stdout);
-    let all_sessions: Vec<String> = output_str
-        .lines()
-        .map(|s| s.to_string())
-        .collect();
+    let all_sessions: Vec<String> = output_str.lines().map(|s| s.to_string()).collect();
 
     // First try to find sessions starting with project_name
     let matched_sessions: Vec<String> = all_sessions
@@ -606,7 +720,7 @@ fn calculate_cursor_pos(input: &str, cursor_idx: usize, max_width: u16) -> (u16,
 
     let mut x = 0;
     let mut y = 0;
-    
+
     for (i, c) in input.char_indices() {
         if i == cursor_idx {
             break;
@@ -622,23 +736,23 @@ fn calculate_cursor_pos(input: &str, cursor_idx: usize, max_width: u16) -> (u16,
             }
         }
     }
-    
+
     (x, y)
 }
 
 fn execute_send_action(action: SendAction) -> Result<()> {
     let window = "apps"; // Assuming standard single window layout
-    
+
     let panes = get_panes(&action.session_name, window)?;
-    
+
     if panes.is_empty() {
-         return Err(MultiAiError::Tmux("No panes found in session".to_string()));
+        return Err(MultiAiError::Tmux("No panes found in session".to_string()));
     }
-    
+
     // Re-sort purely by x first to identify columns.
     let mut x_sorted = panes.clone();
     x_sorted.sort_by_key(|p| p.x);
-    
+
     // Determine column starts
     let mut unique_xs = Vec::new();
     if !x_sorted.is_empty() {
@@ -651,19 +765,20 @@ fn execute_send_action(action: SendAction) -> Result<()> {
             }
         }
     }
-    
+
     // For each column (unique X), get panes and sort by Y.
     let mut column_panes_map: Vec<Vec<TmuxPane>> = Vec::new();
-    
+
     for &x in &unique_xs {
-        let mut col_panes: Vec<TmuxPane> = panes.iter()
+        let mut col_panes: Vec<TmuxPane> = panes
+            .iter()
             .filter(|p| (p.x as i32 - x as i32).abs() <= 5)
             .cloned()
             .collect();
         col_panes.sort_by_key(|p| p.y);
         column_panes_map.push(col_panes);
     }
-    
+
     // Determine which columns to target
     let target_indices: Vec<usize> = match action.app_index {
         Some(idx) => vec![idx],
@@ -674,48 +789,42 @@ fn execute_send_action(action: SendAction) -> Result<()> {
         if app_idx >= column_panes_map.len() {
             continue; // Should we warn?
         }
-        
+
         let target_column = &column_panes_map[app_idx];
-        
+
         let target_pane_index = match action.target_type {
             TargetType::Prompt => 0,
             TargetType::Command => 1,
         };
-        
+
         if target_pane_index >= target_column.len() {
             continue; // Warn?
         }
-        
+
         let target_pane = &target_column[target_pane_index];
-        
+
         let mut final_text = action.text.clone();
-        
+
         // Apply ultrathink if needed
         if action.ultrathink && action.target_type == TargetType::Prompt {
-             // We need to get the app corresponding to this column.
-             // Assuming apps order matches column order.
-             if app_idx < action.apps.len() {
-                 if let Some(ultra) = action.apps[app_idx].ultrathink() {
-                     final_text.push_str("\n\n");
-                     final_text.push_str(ultra);
-                 }
-             }
+            // We need to get the app corresponding to this column.
+            // Assuming apps order matches column order.
+            if app_idx < action.apps.len() {
+                if let Some(ultra) = action.apps[app_idx].ultrathink() {
+                    final_text.push_str("\n\n");
+                    final_text.push_str(ultra);
+                }
+            }
         }
-        
+
         // Send Keys
         let output = Command::new("tmux")
-            .args([
-                "send-keys",
-                "-t",
-                &target_pane.id,
-                &final_text,
-                "Enter",
-            ])
+            .args(["send-keys", "-t", &target_pane.id, &final_text, "Enter"])
             .output()
             .map_err(|e| MultiAiError::CommandFailed(format!("Failed to send keys: {}", e)))?;
-            
+
         if !output.status.success() {
-             eprintln!("Failed to send keys to pane {}", target_pane.id);
+            eprintln!("Failed to send keys to pane {}", target_pane.id);
         }
     }
 
@@ -742,12 +851,15 @@ fn get_panes(session: &str, window: &str) -> Result<Vec<TmuxPane>> {
         .map_err(|e| MultiAiError::CommandFailed(format!("Failed to list panes: {}", e)))?;
 
     if !output.status.success() {
-        return Err(MultiAiError::Tmux(format!("Failed to list panes for {}:{}", session, window)));
+        return Err(MultiAiError::Tmux(format!(
+            "Failed to list panes for {}:{}",
+            session, window
+        )));
     }
-    
+
     let output_str = String::from_utf8_lossy(&output.stdout);
     let mut panes = Vec::new();
-    
+
     for line in output_str.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() == 3 {
@@ -758,6 +870,6 @@ fn get_panes(session: &str, window: &str) -> Result<Vec<TmuxPane>> {
             });
         }
     }
-    
+
     Ok(panes)
 }

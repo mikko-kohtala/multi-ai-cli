@@ -4,14 +4,14 @@ use crate::init;
 use ratatui::crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame, Terminal,
 };
 use std::io;
 use std::time::Duration;
@@ -171,7 +171,7 @@ fn render(f: &mut Frame, state: &PickerState) {
         .constraints([
             Constraint::Length(3), // Header
             Constraint::Length(3), // Env name input
-            Constraint::Min(0),   // App list
+            Constraint::Min(0),    // App list
             Constraint::Length(3), // Footer
         ])
         .split(f.area());
@@ -372,18 +372,14 @@ fn render_prefix_picker(f: &mut Frame, state: &PrefixPickerState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
-            Constraint::Min(0),   // List
+            Constraint::Min(0),    // List
             Constraint::Length(3), // Footer
         ])
         .split(f.area());
 
     // Header
     let header = Paragraph::new(" Remove Worktrees ")
-        .style(
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
-        )
+        .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(header, chunks[0]);

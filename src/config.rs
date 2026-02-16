@@ -66,6 +66,12 @@ pub struct AiApp {
     pub description: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Settings {
+    pub review_prompt: String,
+    pub meta_prompt_template: String,
+}
+
 impl AiApp {
     pub fn as_str(&self) -> &str {
         &self.name
@@ -108,8 +114,10 @@ pub(crate) fn slugify_command(command: &str) -> String {
             let flag = part.trim_start_matches('-');
             // Skip verbose flags, keep meaningful short ones
             match flag {
-                "dangerously-skip-permissions" | "allow-dangerously-skip-permissions"
-                | "dangerously-allow-all" | "allow-all-tools" => {
+                "dangerously-skip-permissions"
+                | "allow-dangerously-skip-permissions"
+                | "dangerously-allow-all"
+                | "allow-all-tools" => {
                     tokens.push("yolo".to_string());
                 }
                 "yolo" | "force" => {
@@ -149,7 +157,13 @@ pub(crate) fn slugify_command(command: &str) -> String {
     let raw = tokens.join("-");
     let sanitized: String = raw
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '.' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '.' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
 
     // Collapse multiple dashes and trim
@@ -188,14 +202,8 @@ mod tests {
             slugify_command("claude --dangerously-skip-permissions"),
             "claude-yolo"
         );
-        assert_eq!(
-            slugify_command("amp --dangerously-allow-all"),
-            "amp-yolo"
-        );
-        assert_eq!(
-            slugify_command("copilot --allow-all-tools"),
-            "copilot-yolo"
-        );
+        assert_eq!(slugify_command("amp --dangerously-allow-all"), "amp-yolo");
+        assert_eq!(slugify_command("copilot --allow-all-tools"), "copilot-yolo");
         assert_eq!(
             slugify_command("cursor-agent --force"),
             "cursor-agent-force"
@@ -213,7 +221,9 @@ mod tests {
     #[test]
     fn test_slugify_model_variants() {
         assert_eq!(
-            slugify_command("codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='high'"),
+            slugify_command(
+                "codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='high'"
+            ),
             "codex-yolo-gpt-5.3-codex"
         );
         assert_eq!(

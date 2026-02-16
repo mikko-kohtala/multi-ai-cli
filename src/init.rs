@@ -1,31 +1,32 @@
 use crate::config::{AiApp, Mode, ProjectConfig};
 use crate::error::{MultiAiError, Result};
-use std::path::PathBuf;
 use ratatui::crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
-    Frame, Terminal,
 };
 use std::fs;
 use std::io;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// The bundled default apps.jsonc content, embedded at compile time.
 const EMBEDDED_APPS_JSONC: &str = include_str!("../apps.jsonc");
 
+/// The bundled default settings.jsonc content, embedded at compile time.
+const EMBEDDED_SETTINGS_JSONC: &str = include_str!("../settings.jsonc");
+
 #[derive(Clone)]
 enum WizardStep {
-    SelectMode {
-        selected: usize,
-    },
+    SelectMode { selected: usize },
     Review,
 }
 
@@ -388,8 +389,9 @@ pub fn default_apps_content() -> String {
 /// Load AI apps from `~/.config/multi-ai-cli/apps.jsonc`.
 /// If the file doesn't exist, falls back to the embedded default.
 pub fn load_apps() -> Result<Vec<AiApp>> {
-    let config_dir = ProjectConfig::config_dir()
-        .map_err(|e| MultiAiError::Config(format!("Could not determine config directory: {}", e)))?;
+    let config_dir = ProjectConfig::config_dir().map_err(|e| {
+        MultiAiError::Config(format!("Could not determine config directory: {}", e))
+    })?;
     let apps_path = config_dir.join("apps.jsonc");
 
     let content = if apps_path.exists() {
@@ -410,11 +412,39 @@ pub fn load_apps() -> Result<Vec<AiApp>> {
     Ok(apps)
 }
 
+/// Load global settings from `~/.config/multi-ai-cli/settings.jsonc`.
+/// If the file doesn't exist, falls back to the embedded default.
+pub fn load_settings() -> Result<crate::config::Settings> {
+    let config_dir = ProjectConfig::config_dir().map_err(|e| {
+        MultiAiError::Config(format!("Could not determine config directory: {}", e))
+    })?;
+    let settings_path = config_dir.join("settings.jsonc");
+
+    let content = if settings_path.exists() {
+        fs::read_to_string(&settings_path)
+            .map_err(|e| MultiAiError::Config(format!("Failed to read settings.jsonc: {}", e)))?
+    } else {
+        EMBEDDED_SETTINGS_JSONC.to_string()
+    };
+
+    let parsed = jsonc_parser::parse_to_serde_value(&content, &Default::default())
+        .map_err(|e| MultiAiError::Config(format!("Failed to parse settings.jsonc: {}", e)))?;
+
+    let value =
+        parsed.ok_or_else(|| MultiAiError::Config("settings.jsonc is empty".to_string()))?;
+
+    let settings: crate::config::Settings = serde_json::from_value(value)
+        .map_err(|e| MultiAiError::Config(format!("Invalid settings.jsonc format: {}", e)))?;
+
+    Ok(settings)
+}
+
 fn save_config(wizard: &WizardState) -> Result<()> {
     let config = wizard.get_config();
 
-    let config_dir = ProjectConfig::config_dir()
-        .map_err(|e| MultiAiError::Config(format!("Could not determine config directory: {}", e)))?;
+    let config_dir = ProjectConfig::config_dir().map_err(|e| {
+        MultiAiError::Config(format!("Could not determine config directory: {}", e))
+    })?;
 
     fs::create_dir_all(&config_dir)?;
 
@@ -425,10 +455,7 @@ fn save_config(wizard: &WizardState) -> Result<()> {
         )
     })?;
 
-    let config_filename = format!(
-        "{}.jsonc",
-        crate::git::generate_config_filename(&repo_url)
-    );
+    let config_filename = format!("{}.jsonc", crate::git::generate_config_filename(&repo_url));
     let config_path = config_dir.join(&config_filename);
 
     // Check if file exists
@@ -449,10 +476,7 @@ fn save_config(wizard: &WizardState) -> Result<()> {
     }
 
     let worktrees_line = if let Some(ref wt_path) = wizard.worktrees_path {
-        format!(
-            "\n  \"worktrees_path\": \"{}\",",
-            wt_path.display()
-        )
+        format!("\n  \"worktrees_path\": \"{}\",", wt_path.display())
     } else {
         String::new()
     };

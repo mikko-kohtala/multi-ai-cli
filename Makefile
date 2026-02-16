@@ -22,6 +22,12 @@ install: build
 	else \
 		echo "→ ~/.config/multi-ai-cli/apps.jsonc exists (not a symlink), skipping"; \
 	fi
+	@if [ -L ~/.config/multi-ai-cli/settings.jsonc ] || [ ! -e ~/.config/multi-ai-cli/settings.jsonc ]; then \
+		ln -sf $(CURDIR)/settings.jsonc ~/.config/multi-ai-cli/settings.jsonc; \
+		echo "→ Symlinked settings.jsonc to ~/.config/multi-ai-cli/settings.jsonc"; \
+	else \
+		echo "→ ~/.config/multi-ai-cli/settings.jsonc exists (not a symlink), skipping"; \
+	fi
 
 clean:
 	cargo clean

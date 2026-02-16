@@ -11,11 +11,7 @@ pub fn get_remote_origin_url(path: &Path) -> Option<String> {
 
     if output.status.success() {
         let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if url.is_empty() {
-            None
-        } else {
-            Some(url)
-        }
+        if url.is_empty() { None } else { Some(url) }
     } else {
         None
     }
@@ -209,7 +205,8 @@ pub fn list_all_branches(path: &Path) -> Vec<BranchInfo> {
                         continue;
                     }
                     seen.insert(short.to_string());
-                    let is_remote = full_name.starts_with("origin/") && !local_names.contains(short);
+                    let is_remote =
+                        full_name.starts_with("origin/") && !local_names.contains(short);
                     sorted.push(BranchInfo {
                         name: short.to_string(),
                         date: date.to_string(),
