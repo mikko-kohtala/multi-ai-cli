@@ -4,8 +4,9 @@ use crate::git::{self, BranchInfo};
 use crate::init;
 use crate::worktree::WorktreeManager;
 use ratatui::crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
-    execute,
+    event::{self, Event, KeyCode, KeyModifiers,
+            KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
+    execute, queue,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
@@ -229,6 +230,57 @@ fn filtered_branches<'a>(branches: &'a [BranchInfo], filter: &str) -> Vec<(usize
 }
 
 // ---------------------------------------------------------------------------
+// Review data persistence
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ReviewData {
+    review_prompt: String,
+    meta_prompt: Option<String>,
+}
+
+/// Derive the review data file path from a config file path.
+/// e.g. `~/.config/multi-ai-cli/github_com_owner_repo.jsonc`
+///    → `~/.config/multi-ai-cli/github_com_owner_repo-review.json`
+fn review_data_path(config_path: &Path) -> PathBuf {
+    let stem = config_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+    config_path.with_file_name(format!("{}-review.json", stem))
+}
+
+fn save_review_data(
+    config_path: &Path,
+    review_prompt: &str,
+    meta_prompt: Option<&str>,
+) -> Result<()> {
+    let data = ReviewData {
+        review_prompt: review_prompt.to_string(),
+        meta_prompt: meta_prompt.map(|s| s.to_string()),
+    };
+    let json = serde_json::to_string_pretty(&data)
+        .map_err(|e| MultiAiError::Review(format!("Failed to serialize review data: {}", e)))?;
+    std::fs::write(review_data_path(config_path), json)
+        .map_err(|e| MultiAiError::Review(format!("Failed to write review data: {}", e)))?;
+    Ok(())
+}
+
+pub fn load_review_data(config_path: &Path) -> Result<(String, Option<String>)> {
+    let path = review_data_path(config_path);
+    let content = std::fs::read_to_string(&path).map_err(|e| {
+        MultiAiError::Review(format!(
+            "No saved review data found ({}): {}",
+            path.display(),
+            e
+        ))
+    })?;
+    let data: ReviewData = serde_json::from_str(&content)
+        .map_err(|e| MultiAiError::Review(format!("Failed to parse review data: {}", e)))?;
+    Ok((data.review_prompt, data.meta_prompt))
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -238,6 +290,7 @@ pub fn run_review(
     project_path: PathBuf,
     worktree_manager: WorktreeManager,
     branch: Option<String>,
+    config_path: &Path,
 ) -> Result<()> {
     // 1. Fetch branches (may involve network I/O) before entering TUI
     print!("Fetching branches...");
@@ -246,10 +299,10 @@ pub fn run_review(
     println!(" {} branches found.", branches.len());
 
     // 2. Run TUI wizard
-    let mut terminal = setup_terminal()?;
+    let (mut terminal, kbd_enhanced) = setup_terminal()?;
     let mut wizard = ReviewWizardState::new(branches, branch.as_deref());
     let result = run_wizard(&mut terminal, &mut wizard);
-    cleanup_terminal(&mut terminal)?;
+    cleanup_terminal(&mut terminal, kbd_enhanced)?;
 
     result?;
 
@@ -322,6 +375,9 @@ pub fn run_review(
         None
     };
 
+    // Save review data for later retrieval via `mai review input` / `mai review meta`
+    save_review_data(config_path, review_prompt, meta_prompt.as_deref())?;
+
     if !wizard.send_prompts {
         println!("Note: AI review prompts will NOT be sent automatically.");
     }
@@ -348,17 +404,47 @@ pub fn run_review(
 // Terminal setup
 // ---------------------------------------------------------------------------
 
-fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
+fn setup_terminal() -> Result<(Terminal<CrosstermBackend<io::Stdout>>, bool)> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
+
+    // Enable keyboard enhancement protocol for proper Shift+Enter detection
+    let mut keyboard_enhancement_enabled = false;
+    if matches!(
+        ratatui::crossterm::terminal::supports_keyboard_enhancement(),
+        Ok(true)
+    ) {
+        queue!(
+            stdout,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            )
+        )
+        .map(|_| keyboard_enhancement_enabled = true)
+        .ok();
+    }
+
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
-    Ok(Terminal::new(backend)?)
+    Ok((Terminal::new(backend)?, keyboard_enhancement_enabled))
 }
 
-fn cleanup_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+fn cleanup_terminal(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    keyboard_enhancement_enabled: bool,
+) -> Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    if keyboard_enhancement_enabled {
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            PopKeyboardEnhancementFlags
+        )?;
+    } else {
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    }
     Ok(())
 }
 
@@ -1215,7 +1301,7 @@ fn create_iterm2_layout_applescript(
     review_apps: &[AiApp],
     worktree_paths: &[(AiApp, String)],
     review_prompt: &str,
-    _meta_prompt: Option<&str>,
+    meta_prompt: Option<&str>,
     branch_prefix: &str,
 ) -> Result<()> {
     if worktree_paths.is_empty() {
@@ -1337,6 +1423,35 @@ tell application "iTerm"
             }
         }
 
+        // --- Type meta prompts into meta-tagged tools (without submitting) ---
+        // Meta reviewers get the prompt typed into their input so the user can
+        // review it before pressing Enter themselves.
+        if let Some(mp) = meta_prompt {
+            let escaped_meta = applescript_escape(mp);
+            for (i, tool) in wizard.selected_tools.iter().enumerate() {
+                if tool.tag != ReviewTag::Meta {
+                    continue;
+                }
+                let col_num = i + 1;
+                if i == 0 {
+                    script.push_str(&format!(
+                        r#"
+            delay 1
+            write text "{}" without newline"#,
+                        escaped_meta
+                    ));
+                } else {
+                    script.push_str(&format!(
+                        r#"
+            tell col{}
+                delay 1
+                write text "{}" without newline
+            end tell"#,
+                        col_num, escaped_meta
+                    ));
+                }
+            }
+        }
     }
 
     // --- Set tab title ---

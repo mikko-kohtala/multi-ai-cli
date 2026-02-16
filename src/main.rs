@@ -1154,6 +1154,13 @@ fn send_command() -> Result<()> {
 }
 
 fn review_command(branch: Option<String>) -> Result<()> {
+    // Handle `mai review input` and `mai review meta` subcommands
+    match branch.as_deref() {
+        Some("input") => return review_input_command(),
+        Some("meta") => return review_meta_command(),
+        _ => {}
+    }
+
     let current_dir = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
@@ -1195,7 +1202,40 @@ fn review_command(branch: Option<String>) -> Result<()> {
 
     sp.finish_with_message("Environment validated");
 
-    review::run_review(project_config, project_name, project_path, worktree_manager, branch)
+    review::run_review(project_config, project_name, project_path, worktree_manager, branch, &config_path)
+}
+
+fn review_input_command() -> Result<()> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
+
+    let (config_path, _, _) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
+        .ok_or_else(|| MultiAiError::Config(
+            "Config not found in ~/.config/multi-ai-cli/. Run 'mai init' from your project directory to create one.".to_string()
+        ))?;
+
+    let (review_prompt, _) = review::load_review_data(&config_path)?;
+    println!("{}", review_prompt);
+    Ok(())
+}
+
+fn review_meta_command() -> Result<()> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
+
+    let (config_path, _, _) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
+        .ok_or_else(|| MultiAiError::Config(
+            "Config not found in ~/.config/multi-ai-cli/. Run 'mai init' from your project directory to create one.".to_string()
+        ))?;
+
+    let (_, meta_prompt) = review::load_review_data(&config_path)?;
+    match meta_prompt {
+        Some(prompt) => println!("{}", prompt),
+        None => println!("No meta reviewer prompt was set for the last review."),
+    }
+    Ok(())
 }
 
 fn format_relative_time(time: SystemTime) -> String {
