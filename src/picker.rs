@@ -11,7 +11,10 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
 };
 use std::io;
 use std::time::Duration;
@@ -429,6 +432,19 @@ fn render_prefix_picker(f: &mut Frame, state: &PrefixPickerState) {
 
     let mut list_state = ListState::default().with_selected(Some(state.focused));
     f.render_stateful_widget(list, chunks[1], &mut list_state);
+
+    // Scrollbar
+    let scrollbar_area = chunks[1].inner(ratatui::layout::Margin {
+        vertical: 1,
+        horizontal: 0,
+    });
+    let mut scrollbar_state =
+        ScrollbarState::new(state.groups.len().saturating_sub(1)).position(state.focused);
+    f.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight),
+        scrollbar_area,
+        &mut scrollbar_state,
+    );
 
     // Footer
     let footer = Paragraph::new(

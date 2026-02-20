@@ -284,13 +284,58 @@ impl WorktreeManager {
             return true;
         }
 
-        // Also try running gwt list to see if it's a valid gwt project
-        Command::new("gwt")
-            .arg("list")
-            .current_dir(&self.project_path)
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+        // Check global gwt config directory as a fallback
+        if let Some(home_dir) = dirs::home_dir() {
+            let gwt_projects_dir = home_dir
+                .join(".config")
+                .join("git-worktree-cli")
+                .join("projects");
+            if gwt_projects_dir.exists() {
+                // Try to find by repo URL
+                if let Some(repo_url) = crate::git::get_remote_origin_url(&self.project_path) {
+                    let config_filename =
+                        format!("{}.jsonc", crate::git::generate_config_filename(&repo_url));
+                    if gwt_projects_dir.join(&config_filename).exists() {
+                        return true;
+                    }
+                }
+
+                // Scan all global configs for matching paths
+                if let Ok(entries) = std::fs::read_dir(&gwt_projects_dir) {
+                    let project_path_canonical = self.project_path.canonicalize().ok();
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().map(|e| e == "jsonc").unwrap_or(false)
+                            && let Ok(content) = std::fs::read_to_string(&path)
+                            && let Ok(Some(serde_json::Value::Object(map))) =
+                                jsonc_parser::parse_to_serde_value(&content, &Default::default())
+                        {
+                            for key in ["worktreesPath", "projectPath"] {
+                                if let Some(serde_json::Value::String(config_path)) = map.get(key) {
+                                    let cfg_path = std::path::PathBuf::from(config_path);
+                                    let matches = if let Some(ref canonical) =
+                                        project_path_canonical
+                                    {
+                                        cfg_path
+                                            .canonicalize()
+                                            .map(|c| canonical == &c || canonical.starts_with(&c))
+                                            .unwrap_or(false)
+                                    } else {
+                                        self.project_path == cfg_path
+                                            || self.project_path.starts_with(&cfg_path)
+                                    };
+                                    if matches {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     pub fn worktrees_exist(&self, branch_prefix: &str, ai_app_names: &[String]) -> bool {

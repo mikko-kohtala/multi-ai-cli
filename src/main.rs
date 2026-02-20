@@ -662,12 +662,6 @@ fn create_command(
         ));
     }
 
-    if !worktree_manager.is_gwt_project() {
-        return Err(MultiAiError::Worktree(
-            "Current directory is not initialized with gwt. Please ensure git-worktree-config.jsonc exists or run 'gwt init' first.".to_string()
-        ));
-    }
-
     sp.finish_with_message("Environment validated");
 
     let ai_apps = if let Some(apps) = override_apps {
@@ -1205,12 +1199,6 @@ fn review_command(branch: Option<String>) -> Result<()> {
     if !worktree_manager.has_gwt_cli() {
         return Err(MultiAiError::Worktree(
             "gwt CLI is not installed. Please install from https://github.com/mikko-kohtala/git-worktree-cli".to_string()
-        ));
-    }
-
-    if !worktree_manager.is_gwt_project() {
-        return Err(MultiAiError::Worktree(
-            "Current directory is not initialized with gwt. Please ensure git-worktree-config.jsonc exists or run 'gwt init' first.".to_string()
         ));
     }
 

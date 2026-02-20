@@ -308,7 +308,7 @@ pub fn run_review(
     // 3. Run TUI wizard
     let (mut terminal, keyboard_enhancement_enabled) = setup_terminal()?;
     let mut wizard = ReviewWizardState::new(branches, branch.as_deref(), &settings);
-    let result = run_wizard(&mut terminal, &mut wizard);
+    let result = run_wizard(&mut terminal, &mut wizard, keyboard_enhancement_enabled);
     cleanup_terminal(&mut terminal, keyboard_enhancement_enabled)?;
 
     result?;
@@ -344,6 +344,25 @@ pub fn run_review(
             }
         })
         .collect();
+
+    // Fetch once before parallel worktree creation to avoid concurrent fetch races.
+    // (gwt internally fetches, and parallel fetches can race on the same remote refs)
+    print!("Fetching latest changes from origin... ");
+    io::stdout().flush().ok();
+    match Command::new("git")
+        .args(["fetch", "origin"])
+        .current_dir(&project_path)
+        .output()
+    {
+        Ok(output) if output.status.success() => println!("ok"),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("warning: git fetch failed: {}", stderr.trim());
+        }
+        Err(e) => {
+            eprintln!("warning: could not run git fetch: {}", e);
+        }
+    }
 
     // 6. Create worktrees in parallel
     println!("Creating review worktrees...");
@@ -381,6 +400,14 @@ pub fn run_review(
     // Save review data for later retrieval via `mai review input` / `mai review meta`
     save_review_data(config_path, review_prompt, meta_prompt.as_deref())?;
 
+    println!("\n--- Review Prompt ---");
+    println!("{}", review_prompt);
+    if let Some(ref meta) = meta_prompt {
+        println!("\n--- Meta Prompt ---");
+        println!("{}", meta);
+    }
+    println!("---\n");
+
     if !wizard.send_prompts {
         println!("Note: AI review prompts will NOT be sent automatically.");
     }
@@ -411,7 +438,7 @@ fn setup_terminal() -> Result<(Terminal<CrosstermBackend<io::Stdout>>, bool)> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
 
-    // Enable keyboard enhancement so Shift+Enter is reported with modifiers.
+    // Request key disambiguation so Shift+Enter can be detected on supporting terminals.
     let mut keyboard_enhancement_enabled = false;
     if matches!(
         ratatui::crossterm::terminal::supports_keyboard_enhancement(),
@@ -419,11 +446,7 @@ fn setup_terminal() -> Result<(Terminal<CrosstermBackend<io::Stdout>>, bool)> {
     ) {
         queue!(
             stdout,
-            PushKeyboardEnhancementFlags(
-                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-            )
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
         )
         .map(|_| keyboard_enhancement_enabled = true)
         .ok();
@@ -458,15 +481,16 @@ fn cleanup_terminal(
 fn run_wizard(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     wizard: &mut ReviewWizardState,
+    keyboard_enhancement_enabled: bool,
 ) -> Result<()> {
     while wizard.app_state == AppState::Running {
         terminal.draw(|f| render(f, wizard))?;
-        handle_input(wizard)?;
+        handle_input(wizard, keyboard_enhancement_enabled)?;
     }
     Ok(())
 }
 
-fn handle_input(wizard: &mut ReviewWizardState) -> Result<()> {
+fn handle_input(wizard: &mut ReviewWizardState, keyboard_enhancement_enabled: bool) -> Result<()> {
     if event::poll(Duration::from_millis(16))?
         && let Event::Key(key) = event::read()?
     {
@@ -482,7 +506,12 @@ fn handle_input(wizard: &mut ReviewWizardState) -> Result<()> {
 
         match &mut wizard.current_step {
             ReviewStep::SelectBranch { .. } => handle_branch_input(wizard, key.code),
-            ReviewStep::Configure { .. } => handle_configure_input(wizard, key.code, key.modifiers),
+            ReviewStep::Configure { .. } => handle_configure_input(
+                wizard,
+                key.code,
+                key.modifiers,
+                keyboard_enhancement_enabled,
+            ),
         }
     }
     Ok(())
@@ -585,7 +614,12 @@ fn handle_branch_input(wizard: &mut ReviewWizardState, key: KeyCode) {
 
 // -- Configure step input --
 
-fn handle_configure_input(wizard: &mut ReviewWizardState, key: KeyCode, modifiers: KeyModifiers) {
+fn handle_configure_input(
+    wizard: &mut ReviewWizardState,
+    key: KeyCode,
+    modifiers: KeyModifiers,
+    keyboard_enhancement_enabled: bool,
+) {
     let ReviewStep::Configure {
         focus,
         prompt_text,
@@ -619,8 +653,11 @@ fn handle_configure_input(wizard: &mut ReviewWizardState, key: KeyCode, modifier
         return;
     }
 
-    // In prompt editor, newline comes from Shift+Enter or fallback keys.
-    if *focus == ConfigSection::Prompt && is_prompt_newline_key(key, modifiers) {
+    // In prompt editor, Shift+Enter inserts a newline.
+    // Fallback: when terminal can't report Shift modifiers, plain Enter inserts newline.
+    if *focus == ConfigSection::Prompt
+        && is_prompt_newline_key(key, modifiers, keyboard_enhancement_enabled)
+    {
         insert_prompt_newline(prompt_text, prompt_cursor);
         return;
     }
@@ -665,7 +702,7 @@ fn handle_configure_input(wizard: &mut ReviewWizardState, key: KeyCode, modifier
 
     match focus {
         ConfigSection::Prompt => {
-            handle_prompt_keys(prompt_text, prompt_cursor, key);
+            handle_prompt_keys(prompt_text, prompt_cursor, key, modifiers);
         }
         ConfigSection::SendPrompts => {
             if key == KeyCode::Char(' ') {
@@ -703,45 +740,75 @@ fn handle_configure_input(wizard: &mut ReviewWizardState, key: KeyCode, modifier
     }
 }
 
-fn is_prompt_newline_key(key: KeyCode, modifiers: KeyModifiers) -> bool {
-    match key {
-        KeyCode::Enter => {
-            modifiers.contains(KeyModifiers::SHIFT) || modifiers.contains(KeyModifiers::ALT)
-        }
-        KeyCode::Char('\n') | KeyCode::Char('\r') => true,
-        // Common fallback when terminals can't send Shift+Enter directly.
-        KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => true,
-        _ => false,
-    }
-}
-
 fn insert_prompt_newline(text: &mut String, cursor: &mut usize) {
     text.insert(*cursor, '\n');
     *cursor += 1;
 }
 
-fn handle_prompt_keys(text: &mut String, cursor: &mut usize, key: KeyCode) {
+fn is_prompt_newline_key(
+    key: KeyCode,
+    modifiers: KeyModifiers,
+    keyboard_enhancement_enabled: bool,
+) -> bool {
     match key {
-        KeyCode::Backspace => {
-            if *cursor > 0 {
-                let prev = text[..*cursor]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                text.drain(prev..*cursor);
-                *cursor = prev;
+        KeyCode::Enter => {
+            if keyboard_enhancement_enabled {
+                // Some terminals still report Shift+Enter as plain Enter.
+                modifiers.contains(KeyModifiers::SHIFT) || modifiers.is_empty()
+            } else {
+                // Fallback for terminals where Shift+Enter is indistinguishable from Enter.
+                true
             }
         }
+        // Common fallback in terminal apps for line break.
+        KeyCode::Char('j') if modifiers.contains(KeyModifiers::CONTROL) => true,
+        _ => false,
+    }
+}
+
+fn delete_prev_char(text: &mut String, cursor: &mut usize) {
+    if *cursor > 0 {
+        let prev = text[..*cursor]
+            .char_indices()
+            .next_back()
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        text.drain(prev..*cursor);
+        *cursor = prev;
+    }
+}
+
+fn delete_next_char(text: &mut String, cursor: &mut usize) {
+    if *cursor < text.len() {
+        let next = text[*cursor..]
+            .char_indices()
+            .nth(1)
+            .map(|(i, _)| *cursor + i)
+            .unwrap_or(text.len());
+        text.drain(*cursor..next);
+    }
+}
+
+fn handle_prompt_keys(
+    text: &mut String,
+    cursor: &mut usize,
+    key: KeyCode,
+    modifiers: KeyModifiers,
+) {
+    match key {
+        KeyCode::Backspace => {
+            delete_prev_char(text, cursor);
+        }
         KeyCode::Delete => {
-            if *cursor < text.len() {
-                let next = text[*cursor..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| *cursor + i)
-                    .unwrap_or(text.len());
-                text.drain(*cursor..next);
-            }
+            delete_next_char(text, cursor);
+        }
+        // Some terminals report delete/backspace as raw control chars.
+        KeyCode::Char('\u{8}') | KeyCode::Char('\u{7f}') => {
+            delete_prev_char(text, cursor);
+        }
+        // Common terminal fallback for forward-delete.
+        KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+            delete_next_char(text, cursor);
         }
         KeyCode::Left => {
             if *cursor > 0 {
@@ -1162,13 +1229,23 @@ fn render_footer(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
 fn generate_review_prefix(worktrees_path: &Path, source_branch: &str) -> String {
     let prefix_base = format!("{}-review", source_branch);
 
+    // Handle branch names with path separators (e.g., "feat/SAMP-117").
+    // Worktree directories mirror the branch path structure.
+    let (scan_dir, name_prefix) = if let Some(pos) = prefix_base.rfind('/') {
+        let parent = &prefix_base[..pos];
+        let name = &prefix_base[pos + 1..];
+        (worktrees_path.join(parent), name.to_string())
+    } else {
+        (worktrees_path.to_path_buf(), prefix_base.clone())
+    };
+
     // Scan existing directories to find the next number
     let mut max_num = 0u32;
-    if let Ok(entries) = std::fs::read_dir(worktrees_path) {
+    if let Ok(entries) = std::fs::read_dir(&scan_dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            // Match pattern: {source_branch}-review-NN-*
-            if let Some(rest) = name.strip_prefix(&format!("{}-", prefix_base)) {
+            // Match pattern: {name_prefix}-NN-*
+            if let Some(rest) = name.strip_prefix(&format!("{}-", name_prefix)) {
                 // rest should start with NN-
                 if let Some(num_str) = rest.split('-').next()
                     && let Ok(num) = num_str.parse::<u32>()
