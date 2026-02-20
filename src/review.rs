@@ -19,7 +19,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
+        ScrollbarState,
     },
 };
 use std::io::{self, Write as _};
@@ -839,6 +839,60 @@ fn handle_prompt_keys(
 }
 
 // ---------------------------------------------------------------------------
+// Text wrapping helpers (character-level, matching cursor math)
+// ---------------------------------------------------------------------------
+
+/// Wrap text into visual lines by splitting at `width` characters.
+/// Newlines in the input start a new visual line.
+fn wrap_text_chars(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut visual_lines = Vec::new();
+    for logical_line in text.split('\n') {
+        let chars: Vec<char> = logical_line.chars().collect();
+        if chars.is_empty() {
+            visual_lines.push(String::new());
+        } else {
+            for chunk in chars.chunks(width) {
+                visual_lines.push(chunk.iter().collect());
+            }
+        }
+    }
+    visual_lines
+}
+
+/// Return (visual_row, visual_col) for a byte-offset cursor position.
+fn cursor_visual_pos(text: &str, cursor: usize, width: usize) -> (usize, usize) {
+    if width == 0 {
+        return (0, 0);
+    }
+    // Find which logical line the cursor is on and the column within it.
+    let before = &text[..cursor];
+    let logical_lines: Vec<&str> = before.split('\n').collect();
+    let logical_line_idx = logical_lines.len().saturating_sub(1);
+    let col_chars = logical_lines.last().map_or(0, |l| l.chars().count());
+
+    // Count visual rows for all logical lines before the cursor's line.
+    let mut vis_row = 0usize;
+    for (idx, logical_line) in text.split('\n').enumerate() {
+        if idx == logical_line_idx {
+            // Add wrapped rows within this line up to the cursor column.
+            vis_row += col_chars / width;
+            let vis_col = col_chars % width;
+            return (vis_row, vis_col);
+        }
+        let line_chars = logical_line.chars().count();
+        vis_row += if line_chars == 0 {
+            1
+        } else {
+            (line_chars + width - 1) / width
+        };
+    }
+    (vis_row, 0)
+}
+
+// ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
@@ -1023,45 +1077,41 @@ fn render_configure(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
         Style::default().fg(Color::DarkGray)
     };
 
-    let paragraph = Paragraph::new(prompt_text.as_str())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(prompt_border)
-                .title(" Review Prompt ")
-                .title_bottom(" Shift+Enter: newline "),
-        )
-        .wrap(Wrap { trim: false });
+    let prompt_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(prompt_border)
+        .title(" Review Prompt ")
+        .title_bottom(" Shift+Enter: newline ");
+    let inner = prompt_block.inner(rows[0]);
+    let inner_width = inner.width as usize;
+    let inner_height = inner.height as usize;
+
+    // Build visual lines by wrapping at character boundaries.
+    // This must match the cursor position math exactly, so we avoid
+    // Paragraph's word-wrap and do character-level wrapping ourselves.
+    let visual_lines = wrap_text_chars(prompt_text, inner_width);
+
+    // Find the cursor's visual row and column.
+    let (cursor_vis_row, cursor_vis_col) =
+        cursor_visual_pos(prompt_text, *prompt_cursor, inner_width);
+
+    // Scroll so the cursor row is visible.
+    let scroll_offset = if cursor_vis_row >= inner_height {
+        cursor_vis_row - inner_height + 1
+    } else {
+        0
+    };
+
+    let wrapped_text = visual_lines.join("\n");
+    let paragraph = Paragraph::new(wrapped_text.as_str())
+        .block(prompt_block)
+        .scroll((scroll_offset as u16, 0));
     f.render_widget(paragraph, rows[0]);
 
     // Show cursor when prompt is focused
     if *focus == ConfigSection::Prompt {
-        let inner = Block::default().borders(Borders::ALL).inner(rows[0]);
-        let lines_before: Vec<&str> = prompt_text[..*prompt_cursor].split('\n').collect();
-        let cursor_line = lines_before.len().saturating_sub(1);
-        let cursor_col = lines_before.last().map_or(0, |l| l.chars().count());
-
-        let inner_width = inner.width as usize;
-        let mut screen_row = 0u16;
-        let mut screen_col = 0u16;
-
-        for (line_idx, line) in prompt_text.split('\n').enumerate() {
-            let line_len = line.chars().count();
-            let wrapped_lines = if inner_width > 0 {
-                ((line_len.max(1)) as f64 / inner_width as f64).ceil() as u16
-            } else {
-                1
-            };
-
-            if line_idx == cursor_line {
-                if inner_width > 0 {
-                    screen_row += (cursor_col / inner_width) as u16;
-                    screen_col = (cursor_col % inner_width) as u16;
-                }
-                break;
-            }
-            screen_row += wrapped_lines;
-        }
+        let screen_row = cursor_vis_row.saturating_sub(scroll_offset) as u16;
+        let screen_col = cursor_vis_col as u16;
 
         let final_row = inner.y + screen_row;
         let final_col = inner.x + screen_col;
