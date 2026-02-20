@@ -345,46 +345,17 @@ pub fn run_review(
         })
         .collect();
 
-    // Fetch once before parallel worktree creation to avoid concurrent fetch races.
-    // (gwt internally fetches, and parallel fetches can race on the same remote refs)
-    print!("Fetching latest changes from origin... ");
-    io::stdout().flush().ok();
-    match Command::new("git")
-        .args(["fetch", "origin"])
-        .current_dir(&project_path)
-        .output()
-    {
-        Ok(output) if output.status.success() => println!("ok"),
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("warning: git fetch failed: {}", stderr.trim());
-        }
-        Err(e) => {
-            eprintln!("warning: could not run git fetch: {}", e);
-        }
-    }
-
-    // 6. Create worktrees in parallel
-    println!("Creating review worktrees...");
-    let worktree_paths = create_review_worktrees(
-        &worktree_manager,
-        &branch_prefix,
-        &review_apps,
-        &wizard.source_branch_ref,
-    )?;
-    println!("All review worktrees created.");
-
-    // 7. Build review & meta prompts
+    // 6. Build review & meta prompts (before creating worktrees so user sees them early)
     let review_prompt = &wizard.review_prompt;
 
-    // Build review locations for meta prompt
+    // Build review locations for meta prompt using predictable worktree paths
     let mut review_locations = Vec::new();
     for (i, tool) in wizard.selected_tools.iter().enumerate() {
         if tool.tag == ReviewTag::Ai {
-            if let Some((_app, path)) = worktree_paths.get(i) {
-                let app = &wizard.review_services[tool.service_index];
-                review_locations.push(format!("- {}: {}/REVIEW.md", app.name, path));
-            }
+            let app = &wizard.review_services[tool.service_index];
+            let branch_name = format!("{}-{}-01", branch_prefix, review_apps[i].slug());
+            let path = worktree_manager.worktrees_path().join(&branch_name);
+            review_locations.push(format!("- {}: {}/REVIEW.md", app.name, path.display()));
         }
     }
     let meta_prompt = if !review_locations.is_empty() {
@@ -407,6 +378,35 @@ pub fn run_review(
         println!("{}", meta);
     }
     println!("---\n");
+
+    // Fetch once before parallel worktree creation to avoid concurrent fetch races.
+    // (gwt internally fetches, and parallel fetches can race on the same remote refs)
+    print!("Fetching latest changes from origin... ");
+    io::stdout().flush().ok();
+    match Command::new("git")
+        .args(["fetch", "origin"])
+        .current_dir(&project_path)
+        .output()
+    {
+        Ok(output) if output.status.success() => println!("ok"),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("warning: git fetch failed: {}", stderr.trim());
+        }
+        Err(e) => {
+            eprintln!("warning: could not run git fetch: {}", e);
+        }
+    }
+
+    // 7. Create worktrees in parallel
+    println!("Creating review worktrees...");
+    let worktree_paths = create_review_worktrees(
+        &worktree_manager,
+        &branch_prefix,
+        &review_apps,
+        &wizard.source_branch_ref,
+    )?;
+    println!("All review worktrees created.");
 
     if !wizard.send_prompts {
         println!("Note: AI review prompts will NOT be sent automatically.");
