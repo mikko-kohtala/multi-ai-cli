@@ -886,7 +886,7 @@ fn cursor_visual_pos(text: &str, cursor: usize, width: usize) -> (usize, usize) 
         vis_row += if line_chars == 0 {
             1
         } else {
-            (line_chars + width - 1) / width
+            line_chars.div_ceil(width)
         };
     }
     (vis_row, 0)
