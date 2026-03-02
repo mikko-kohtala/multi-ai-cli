@@ -93,6 +93,7 @@ impl WizardState {
             mode: Some(self.terminal_mode.clone()),
             project_path: Some(self.project_path.clone()),
             worktrees_path: self.worktrees_path.clone(),
+            hooks: Default::default(),
         }
     }
 }

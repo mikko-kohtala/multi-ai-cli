@@ -4,6 +4,14 @@ use std::path::{Path, PathBuf};
 
 use crate::git;
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct Hooks {
+    #[serde(default, rename = "postAdd")]
+    pub post_add: Vec<String>,
+    #[serde(default, rename = "preRemove")]
+    pub pre_remove: Vec<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProjectConfig {
     #[serde(default)]
@@ -18,6 +26,9 @@ pub struct ProjectConfig {
     /// Optional worktrees path for global configs - where worktrees should be created
     #[serde(default)]
     pub worktrees_path: Option<PathBuf>,
+    /// Lifecycle hooks that run during worktree operations
+    #[serde(default)]
+    pub hooks: Hooks,
 }
 
 fn default_terminals_per_column() -> usize {

@@ -24,7 +24,7 @@ use ratatui::{
 };
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -289,7 +289,7 @@ pub fn load_review_data(config_path: &Path) -> Result<(String, Option<String>)> 
 // ---------------------------------------------------------------------------
 
 pub fn run_review(
-    _project_config: crate::config::ProjectConfig,
+    project_config: crate::config::ProjectConfig,
     project_name: String,
     project_path: PathBuf,
     worktree_manager: WorktreeManager,
@@ -405,6 +405,7 @@ pub fn run_review(
         &branch_prefix,
         &review_apps,
         &wizard.source_branch_ref,
+        &project_config.hooks.post_add,
     )?;
     println!("All review worktrees created.");
 
@@ -1318,6 +1319,7 @@ fn create_review_worktrees(
     branch_prefix: &str,
     review_apps: &[AiApp],
     source_branch: &str,
+    post_add_hooks: &[String],
 ) -> Result<Vec<(AiApp, String)>> {
     let worktree_paths = Arc::new(Mutex::new(Vec::new()));
     let errors = Arc::new(Mutex::new(Vec::new()));
@@ -1331,6 +1333,7 @@ fn create_review_worktrees(
         let project_path = worktree_manager.project_path().to_path_buf();
         let wt_path = worktree_manager.worktrees_path().to_path_buf();
         let source_branch = source_branch.to_string();
+        let hooks = post_add_hooks.to_vec();
 
         let handle = thread::spawn(move || {
             println!(
@@ -1350,6 +1353,32 @@ fn create_review_worktrees(
 
                     match reset_result {
                         Ok(output) if output.status.success() => {
+                            // Run postAdd hooks
+                            for cmd in &hooks {
+                                println!(
+                                    "  Running postAdd hook for {}: {}",
+                                    ai_app_clone.as_str(),
+                                    cmd
+                                );
+                                let hook_result = Command::new("sh")
+                                    .args(["-c", cmd])
+                                    .current_dir(&worktree_path)
+                                    .stdout(Stdio::inherit())
+                                    .stderr(Stdio::inherit())
+                                    .status();
+                                match hook_result {
+                                    Ok(s) if s.success() => {}
+                                    Ok(s) => eprintln!(
+                                        "  Warning: postAdd hook '{}' exited with {}",
+                                        cmd, s
+                                    ),
+                                    Err(e) => eprintln!(
+                                        "  Warning: failed to run postAdd hook '{}': {}",
+                                        cmd, e
+                                    ),
+                                }
+                            }
+
                             println!(
                                 "  Created worktree for {}: {}",
                                 ai_app_clone.as_str(),

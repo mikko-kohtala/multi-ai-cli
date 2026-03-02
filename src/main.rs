@@ -710,6 +710,7 @@ fn create_command(
     let mut handles = vec![];
 
     let config_wt_path = project_config.worktrees_path.clone();
+    let post_add_hooks = project_config.hooks.post_add.clone();
     for ai_app in &ai_apps {
         let branch_name = format!("{}-{}", branch_prefix, ai_app.slug());
         let ai_app_clone = ai_app.clone();
@@ -717,6 +718,7 @@ fn create_command(
         let config_wt_path_clone = config_wt_path.clone();
         let worktree_paths_clone = Arc::clone(&worktree_paths);
         let errors_clone = Arc::clone(&errors);
+        let hooks = post_add_hooks.clone();
 
         let handle = thread::spawn(move || {
             println!(
@@ -732,6 +734,32 @@ fn create_command(
             };
             match worktree_manager.add_worktree(&branch_name) {
                 Ok(worktree_path) => {
+                    // Run postAdd hooks
+                    for cmd in &hooks {
+                        println!(
+                            "  Running postAdd hook for {}: {}",
+                            ai_app_clone.command(),
+                            cmd
+                        );
+                        let hook_result = std::process::Command::new("sh")
+                            .args(["-c", cmd])
+                            .current_dir(&worktree_path)
+                            .stdout(std::process::Stdio::inherit())
+                            .stderr(std::process::Stdio::inherit())
+                            .status();
+                        match hook_result {
+                            Ok(s) if s.success() => {}
+                            Ok(s) => eprintln!(
+                                "  Warning: postAdd hook '{}' exited with {}",
+                                cmd, s
+                            ),
+                            Err(e) => eprintln!(
+                                "  Warning: failed to run postAdd hook '{}': {}",
+                                cmd, e
+                            ),
+                        }
+                    }
+
                     println!(
                         "  ✓ Created worktree for {}: {}",
                         ai_app_clone.command(),
