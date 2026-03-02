@@ -51,8 +51,15 @@
     "name": "codex",
     "slug": "codex-yolo-gpt-5.3-codex",
     "command": "codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='high'",
-    "default": true,
+    "default": false,
     "description": "YOLO + gpt-5.3-codex model - high reasoning with auto-approval",
+  },
+  {
+    "name": "codex",
+    "slug": "codex-gpt-5.3-codex-xhigh",
+    "command": "codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='xhigh'",
+    "default": true,
+    "description": "YOLO + gpt-5.3-codex model - extra high reasoning with auto-approval",
   },
   {
     "name": "codex",
