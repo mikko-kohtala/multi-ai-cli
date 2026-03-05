@@ -224,6 +224,46 @@ pub fn list_all_branches(path: &Path) -> Vec<BranchInfo> {
     all
 }
 
+/// Detect the default branch for the remote origin.
+/// Tries `git symbolic-ref refs/remotes/origin/HEAD`, then checks for
+/// `origin/main` and `origin/master`. Falls back to `"main"`.
+pub fn get_default_branch(path: &Path) -> String {
+    // Try symbolic-ref (set by clone or `git remote set-head origin --auto`)
+    if let Ok(output) = Command::new("git")
+        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
+        .current_dir(path)
+        .output()
+        && output.status.success()
+    {
+        let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if let Some(branch) = refname.strip_prefix("refs/remotes/origin/") {
+            return branch.to_string();
+        }
+    }
+
+    // Fallback: check if origin/main exists
+    if let Ok(output) = Command::new("git")
+        .args(["rev-parse", "--verify", "origin/main"])
+        .current_dir(path)
+        .output()
+        && output.status.success()
+    {
+        return "main".to_string();
+    }
+
+    // Fallback: check if origin/master exists
+    if let Ok(output) = Command::new("git")
+        .args(["rev-parse", "--verify", "origin/master"])
+        .current_dir(path)
+        .output()
+        && output.status.success()
+    {
+        return "master".to_string();
+    }
+
+    "main".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

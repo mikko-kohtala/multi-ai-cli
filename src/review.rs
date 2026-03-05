@@ -84,6 +84,11 @@ enum ReviewStep {
         focused: usize,
         filter: String,
     },
+    SelectBaseBranch {
+        branches: Vec<BranchInfo>,
+        focused: usize,
+        filter: String,
+    },
     Configure {
         focus: ConfigSection,
         // Prompt
@@ -115,10 +120,17 @@ struct ReviewWizardState {
     // Available tools loaded from apps.jsonc
     review_services: Vec<AiApp>,
 
+    // Project path for git operations (e.g. detecting default branch)
+    project_path: PathBuf,
+    // Branch list (shared across selection steps)
+    all_branches: Vec<BranchInfo>,
+
     // Populated when user confirms
     source_branch: String,
     /// Full git ref for reset (e.g. "origin/branch" for remote-only branches).
     source_branch_ref: String,
+    base_branch: String,
+    base_branch_ref: String,
     review_prompt: String,
     send_prompts: bool,
     selected_tools: Vec<SelectedTool>,
@@ -129,64 +141,64 @@ impl ReviewWizardState {
         branches: Vec<BranchInfo>,
         branch: Option<&str>,
         settings: &crate::config::Settings,
+        project_path: &Path,
     ) -> Self {
         let review_services = init::load_apps().unwrap_or_default();
         let default_prompt = settings.review_prompt.clone();
+        let default_branch = git::get_default_branch(project_path);
 
-        // If a branch argument was given and matches exactly, skip to Configure
-        if let Some(b) = branch {
-            if let Some(matched) = branches.iter().find(|bi| bi.name == b) {
-                let source_branch = matched.name.clone();
-                let source_branch_ref = if matched.remote_only {
-                    format!("origin/{}", matched.name)
-                } else {
-                    matched.name.clone()
-                };
+        // If a branch argument was given and matches exactly, skip to SelectBaseBranch
+        if let Some(b) = branch
+            && let Some(matched) = branches.iter().find(|bi| bi.name == b)
+        {
+            let source_branch = matched.name.clone();
+            let source_branch_ref = if matched.remote_only {
+                format!("origin/{}", matched.name)
+            } else {
+                matched.name.clone()
+            };
 
-                let mut ai_selected: Vec<bool> =
-                    review_services.iter().map(|app| app.default).collect();
-                if !ai_selected.iter().any(|&s| s) && !ai_selected.is_empty() {
-                    ai_selected[0] = true;
-                }
-                let meta_selected: Vec<bool> =
-                    review_services.iter().map(|a| a.meta_review).collect();
+            let default_idx = branches
+                .iter()
+                .position(|b| b.name == default_branch)
+                .unwrap_or(0);
 
-                let prompt = default_prompt.clone();
-                let len = prompt.len();
-                return Self {
-                    current_step: ReviewStep::Configure {
-                        focus: ConfigSection::AiReviewers,
-                        prompt_text: prompt,
-                        prompt_cursor: len,
-                        send_prompts: true,
-                        ai_selected,
-                        ai_focused: 0,
-                        meta_selected,
-                        meta_focused: 0,
-                    },
-                    history: Vec::new(),
-                    app_state: AppState::Running,
-                    review_services,
-                    source_branch,
-                    source_branch_ref,
-                    review_prompt: default_prompt,
-                    send_prompts: true,
-                    selected_tools: Vec::new(),
-                };
-            }
+            return Self {
+                current_step: ReviewStep::SelectBaseBranch {
+                    branches: branches.clone(),
+                    focused: default_idx,
+                    filter: String::new(),
+                },
+                history: Vec::new(),
+                app_state: AppState::Running,
+                review_services,
+                project_path: project_path.to_path_buf(),
+                all_branches: branches,
+                source_branch,
+                source_branch_ref,
+                base_branch: String::new(),
+                base_branch_ref: String::new(),
+                review_prompt: default_prompt,
+                send_prompts: true,
+                selected_tools: Vec::new(),
+            };
         }
 
         Self {
             current_step: ReviewStep::SelectBranch {
-                branches,
+                branches: branches.clone(),
                 focused: 0,
                 filter: String::new(),
             },
             history: Vec::new(),
             app_state: AppState::Running,
             review_services,
+            project_path: project_path.to_path_buf(),
+            all_branches: branches,
             source_branch: String::new(),
             source_branch_ref: String::new(),
+            base_branch: String::new(),
+            base_branch_ref: String::new(),
             review_prompt: default_prompt,
             send_prompts: true,
             selected_tools: Vec::new(),
@@ -210,8 +222,9 @@ impl ReviewWizardState {
 
     fn step_number(&self) -> (usize, usize) {
         match &self.current_step {
-            ReviewStep::SelectBranch { .. } => (1, 2),
-            ReviewStep::Configure { .. } => (2, 2),
+            ReviewStep::SelectBranch { .. } => (1, 3),
+            ReviewStep::SelectBaseBranch { .. } => (2, 3),
+            ReviewStep::Configure { .. } => (3, 3),
         }
     }
 }
@@ -241,6 +254,8 @@ fn filtered_branches<'a>(branches: &'a [BranchInfo], filter: &str) -> Vec<(usize
 struct ReviewData {
     review_prompt: String,
     meta_prompt: Option<String>,
+    #[serde(default)]
+    base_branch: Option<String>,
 }
 
 /// Derive the review data file path from a config file path.
@@ -258,10 +273,12 @@ fn save_review_data(
     config_path: &Path,
     review_prompt: &str,
     meta_prompt: Option<&str>,
+    base_branch: Option<&str>,
 ) -> Result<()> {
     let data = ReviewData {
         review_prompt: review_prompt.to_string(),
         meta_prompt: meta_prompt.map(|s| s.to_string()),
+        base_branch: base_branch.map(|s| s.to_string()),
     };
     let json = serde_json::to_string_pretty(&data)
         .map_err(|e| MultiAiError::Review(format!("Failed to serialize review data: {}", e)))?;
@@ -307,7 +324,7 @@ pub fn run_review(
 
     // 3. Run TUI wizard
     let (mut terminal, keyboard_enhancement_enabled) = setup_terminal()?;
-    let mut wizard = ReviewWizardState::new(branches, branch.as_deref(), &settings);
+    let mut wizard = ReviewWizardState::new(branches, branch.as_deref(), &settings, &project_path);
     let result = run_wizard(&mut terminal, &mut wizard, keyboard_enhancement_enabled);
     cleanup_terminal(&mut terminal, keyboard_enhancement_enabled)?;
 
@@ -346,7 +363,9 @@ pub fn run_review(
         .collect();
 
     // 6. Build review & meta prompts (before creating worktrees so user sees them early)
-    let review_prompt = &wizard.review_prompt;
+    let review_prompt = wizard
+        .review_prompt
+        .replace("{{base_branch}}", &wizard.base_branch);
 
     // Build review locations for meta prompt using predictable worktree paths
     let mut review_locations = Vec::new();
@@ -362,14 +381,20 @@ pub fn run_review(
         Some(
             settings
                 .meta_prompt_template
-                .replace("{{review_locations}}", &review_locations.join("\n")),
+                .replace("{{review_locations}}", &review_locations.join("\n"))
+                .replace("{{base_branch}}", &wizard.base_branch),
         )
     } else {
         None
     };
 
     // Save review data for later retrieval via `mai review input` / `mai review meta`
-    save_review_data(config_path, review_prompt, meta_prompt.as_deref())?;
+    save_review_data(
+        config_path,
+        &review_prompt,
+        meta_prompt.as_deref(),
+        Some(&wizard.base_branch),
+    )?;
 
     println!("\n--- Review Prompt ---");
     println!("{}", review_prompt);
@@ -405,6 +430,7 @@ pub fn run_review(
         &branch_prefix,
         &review_apps,
         &wizard.source_branch_ref,
+        &wizard.base_branch,
         &project_config.hooks.post_add,
     )?;
     println!("All review worktrees created.");
@@ -419,7 +445,7 @@ pub fn run_review(
         &wizard,
         &review_apps,
         &worktree_paths,
-        review_prompt,
+        &review_prompt,
         meta_prompt.as_deref(),
         &branch_prefix,
     )?;
@@ -507,6 +533,7 @@ fn handle_input(wizard: &mut ReviewWizardState, keyboard_enhancement_enabled: bo
 
         match &mut wizard.current_step {
             ReviewStep::SelectBranch { .. } => handle_branch_input(wizard, key.code),
+            ReviewStep::SelectBaseBranch { .. } => handle_base_branch_input(wizard, key.code),
             ReviewStep::Configure { .. } => handle_configure_input(
                 wizard,
                 key.code,
@@ -541,34 +568,17 @@ fn handle_branch_input(wizard: &mut ReviewWizardState, key: KeyCode) {
                         branch.name.clone()
                     };
 
-                    let mut ai_selected: Vec<bool> = wizard
-                        .review_services
+                    let default_branch = git::get_default_branch(&wizard.project_path);
+                    let all_branches = wizard.all_branches.clone();
+                    let default_idx = all_branches
                         .iter()
-                        .map(|app| app.default)
-                        .collect();
-                    // If no defaults configured, select the first entry
-                    if !ai_selected.iter().any(|&s| s) && !ai_selected.is_empty() {
-                        ai_selected[0] = true;
-                    }
+                        .position(|b| b.name == default_branch)
+                        .unwrap_or(0);
 
-                    // Pre-select entries marked with meta_review in apps.jsonc
-                    let meta_selected: Vec<bool> = wizard
-                        .review_services
-                        .iter()
-                        .map(|a| a.meta_review)
-                        .collect();
-
-                    let prompt = wizard.review_prompt.clone();
-                    let len = prompt.len();
-                    wizard.next(ReviewStep::Configure {
-                        focus: ConfigSection::AiReviewers,
-                        prompt_text: prompt,
-                        prompt_cursor: len,
-                        send_prompts: wizard.send_prompts,
-                        ai_selected,
-                        ai_focused: 0,
-                        meta_selected,
-                        meta_focused: 0,
+                    wizard.next(ReviewStep::SelectBaseBranch {
+                        branches: all_branches,
+                        focused: default_idx,
+                        filter: String::new(),
                     });
                 }
             }
@@ -602,6 +612,99 @@ fn handle_branch_input(wizard: &mut ReviewWizardState, key: KeyCode) {
         }
         KeyCode::Char(c) => {
             if let ReviewStep::SelectBranch {
+                filter, focused, ..
+            } = &mut wizard.current_step
+            {
+                filter.push(c);
+                *focused = 0;
+            }
+        }
+        _ => {}
+    }
+}
+
+// -- Base branch step input --
+
+fn handle_base_branch_input(wizard: &mut ReviewWizardState, key: KeyCode) {
+    match key {
+        KeyCode::Esc | KeyCode::Left => {
+            wizard.back();
+        }
+        KeyCode::Enter | KeyCode::Right => {
+            if let ReviewStep::SelectBaseBranch {
+                branches,
+                focused,
+                filter,
+            } = &wizard.current_step
+            {
+                let filtered = filtered_branches(branches, filter);
+                if let Some((_orig_idx, branch)) = filtered.get(*focused) {
+                    wizard.base_branch = branch.name.clone();
+                    wizard.base_branch_ref = if branch.remote_only {
+                        format!("origin/{}", branch.name)
+                    } else {
+                        branch.name.clone()
+                    };
+
+                    let mut ai_selected: Vec<bool> = wizard
+                        .review_services
+                        .iter()
+                        .map(|app| app.default)
+                        .collect();
+                    if !ai_selected.iter().any(|&s| s) && !ai_selected.is_empty() {
+                        ai_selected[0] = true;
+                    }
+
+                    let meta_selected: Vec<bool> = wizard
+                        .review_services
+                        .iter()
+                        .map(|a| a.meta_review)
+                        .collect();
+
+                    let prompt = wizard.review_prompt.clone();
+                    let len = prompt.len();
+                    wizard.next(ReviewStep::Configure {
+                        focus: ConfigSection::AiReviewers,
+                        prompt_text: prompt,
+                        prompt_cursor: len,
+                        send_prompts: wizard.send_prompts,
+                        ai_selected,
+                        ai_focused: 0,
+                        meta_selected,
+                        meta_focused: 0,
+                    });
+                }
+            }
+        }
+        KeyCode::Up => {
+            if let ReviewStep::SelectBaseBranch { focused, .. } = &mut wizard.current_step {
+                *focused = focused.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if let ReviewStep::SelectBaseBranch {
+                branches,
+                focused,
+                filter,
+            } = &mut wizard.current_step
+            {
+                let count = filtered_branches(branches, filter).len();
+                if count > 0 && *focused < count - 1 {
+                    *focused += 1;
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let ReviewStep::SelectBaseBranch {
+                filter, focused, ..
+            } = &mut wizard.current_step
+            {
+                filter.pop();
+                *focused = 0;
+            }
+        }
+        KeyCode::Char(c) => {
+            if let ReviewStep::SelectBaseBranch {
                 filter, focused, ..
             } = &mut wizard.current_step
             {
@@ -829,6 +932,12 @@ fn handle_prompt_keys(
                     .unwrap_or(text.len());
             }
         }
+        KeyCode::Up => {
+            prompt_cursor_vertical(text, cursor, -1);
+        }
+        KeyCode::Down => {
+            prompt_cursor_vertical(text, cursor, 1);
+        }
         KeyCode::Home => *cursor = 0,
         KeyCode::End => *cursor = text.len(),
         KeyCode::Char(c) => {
@@ -836,6 +945,39 @@ fn handle_prompt_keys(
             *cursor += c.len_utf8();
         }
         _ => {}
+    }
+}
+
+/// Move cursor up or down by one logical line (delimited by '\n').
+fn prompt_cursor_vertical(text: &str, cursor: &mut usize, direction: i32) {
+    let before = &text[..*cursor];
+    let current_line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let col = *cursor - current_line_start;
+
+    if direction < 0 {
+        // Up: move to previous line
+        if current_line_start == 0 {
+            return; // already on first line
+        }
+        let prev_line_end = current_line_start - 1; // points to the '\n'
+        let prev_line_start = text[..prev_line_end]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let prev_line_len = prev_line_end - prev_line_start;
+        *cursor = prev_line_start + col.min(prev_line_len);
+    } else {
+        // Down: move to next line
+        let Some(nl_offset) = text[current_line_start..].find('\n') else {
+            return; // already on last line
+        };
+        let next_line_start = current_line_start + nl_offset + 1;
+        let next_line_end = text[next_line_start..]
+            .find('\n')
+            .map(|i| next_line_start + i)
+            .unwrap_or(text.len());
+        let next_line_len = next_line_end - next_line_start;
+        *cursor = next_line_start + col.min(next_line_len);
     }
 }
 
@@ -914,7 +1056,9 @@ fn render(f: &mut Frame, wizard: &ReviewWizardState) {
 
 fn render_header(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
     let (current, total) = wizard.step_number();
-    let branch_suffix = if !wizard.source_branch.is_empty() {
+    let branch_suffix = if !wizard.source_branch.is_empty() && !wizard.base_branch.is_empty() {
+        format!(" — {} → {} ", wizard.source_branch, wizard.base_branch)
+    } else if !wizard.source_branch.is_empty() {
         format!(" — {} ", wizard.source_branch)
     } else {
         String::new()
@@ -940,7 +1084,19 @@ fn render_content(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
             branches,
             focused,
             filter,
-        } => render_branch_select(f, area, branches, *focused, filter),
+        } => render_branch_select(f, area, branches, *focused, filter, "Select Branch to Review"),
+        ReviewStep::SelectBaseBranch {
+            branches,
+            focused,
+            filter,
+        } => render_branch_select(
+            f,
+            area,
+            branches,
+            *focused,
+            filter,
+            "Select Base Branch (PR target)",
+        ),
         ReviewStep::Configure { .. } => render_configure(f, area, wizard),
     }
 }
@@ -951,6 +1107,7 @@ fn render_branch_select(
     branches: &[BranchInfo],
     focused: usize,
     filter: &str,
+    heading: &str,
 ) {
     let filtered = filtered_branches(branches, filter);
 
@@ -1003,8 +1160,8 @@ fn render_branch_select(
     };
 
     let title = format!(
-        " Select Branch to Review{} [{} branches] ",
-        filter_display,
+        " {}{} [{} branches] ",
+        heading, filter_display,
         filtered.len()
     );
 
@@ -1249,6 +1406,9 @@ fn render_footer(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
         ReviewStep::SelectBranch { .. } => {
             "Type to filter | ↑/↓: navigate | Enter: select | Esc: cancel | Ctrl+C: quit"
         }
+        ReviewStep::SelectBaseBranch { .. } => {
+            "Type to filter | ↑/↓: navigate | Enter: select | Esc: back | Ctrl+C: quit"
+        }
         ReviewStep::Configure { focus, .. } => match focus {
             ConfigSection::Prompt => {
                 "Tab: next section | Shift+Enter: newline | Esc: back | Ctrl+C: quit"
@@ -1319,6 +1479,7 @@ fn create_review_worktrees(
     branch_prefix: &str,
     review_apps: &[AiApp],
     source_branch: &str,
+    base_branch: &str,
     post_add_hooks: &[String],
 ) -> Result<Vec<(AiApp, String)>> {
     let worktree_paths = Arc::new(Mutex::new(Vec::new()));
@@ -1333,6 +1494,7 @@ fn create_review_worktrees(
         let project_path = worktree_manager.project_path().to_path_buf();
         let wt_path = worktree_manager.worktrees_path().to_path_buf();
         let source_branch = source_branch.to_string();
+        let base_branch = base_branch.to_string();
         let hooks = post_add_hooks.to_vec();
 
         let handle = thread::spawn(move || {
@@ -1376,6 +1538,32 @@ fn create_review_worktrees(
                                         "  Warning: failed to run postAdd hook '{}': {}",
                                         cmd, e
                                     ),
+                                }
+                            }
+
+                            // Pre-compute merge-base diff (best-effort)
+                            if !base_branch.is_empty()
+                                && let Ok(mb_out) = Command::new("git")
+                                    .args([
+                                        "merge-base",
+                                        &format!("origin/{}", base_branch),
+                                        "HEAD",
+                                    ])
+                                    .current_dir(&worktree_path)
+                                    .output()
+                                && mb_out.status.success()
+                            {
+                                let merge_base = String::from_utf8_lossy(&mb_out.stdout)
+                                    .trim()
+                                    .to_string();
+                                if let Ok(diff_out) = Command::new("git")
+                                    .args(["diff", &format!("{}..HEAD", merge_base)])
+                                    .current_dir(&worktree_path)
+                                    .output()
+                                    && diff_out.status.success()
+                                {
+                                    let diff_path = worktree_path.join("CHANGES.diff");
+                                    let _ = std::fs::write(&diff_path, &diff_out.stdout);
                                 }
                             }
 
