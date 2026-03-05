@@ -66,6 +66,9 @@ mai remove <branch-prefix> --tmux            # Remove tmux session
 mai continue <branch-prefix>                 # Create new session/tab for existing worktrees
 mai resume <branch-prefix>                   # Alias for continue
 mai send                                     # Open TUI to send commands to sessions
+mai plan [branch]                            # Launch multi-AI collaborative planning
+mai plan input                               # Print last saved plan prompt
+mai plan meta                                # Print last saved meta planner prompt
 
 # Initialize a new config file:
 mai init                                      # Interactive setup, saves to ~/.config/multi-ai-cli/

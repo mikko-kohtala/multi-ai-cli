@@ -81,6 +81,10 @@ pub struct AiApp {
 pub struct Settings {
     pub review_prompt: String,
     pub meta_prompt_template: String,
+    #[serde(default)]
+    pub plan_prompt: Option<String>,
+    #[serde(default)]
+    pub plan_meta_prompt_template: Option<String>,
 }
 
 impl AiApp {

@@ -5,6 +5,7 @@ mod init;
 #[cfg(target_os = "macos")]
 mod iterm2;
 mod picker;
+mod plan;
 mod review;
 mod send;
 mod tmux;
@@ -141,6 +142,13 @@ enum Command {
         branch: Option<String>,
     },
 
+    #[command(about = "Launch interactive multi-AI collaborative planning")]
+    Plan {
+        /// Branch to plan on (skips branch selection if exact match found)
+        #[arg(index = 1)]
+        branch: Option<String>,
+    },
+
     #[command(about = "Open the project config file in the default application")]
     Config,
 
@@ -210,6 +218,7 @@ fn main() -> Result<()> {
         }) => continue_command(branch_prefix, tmux, mode),
         Some(Command::Send) => send_command(),
         Some(Command::Review { branch }) => review_command(branch),
+        Some(Command::Plan { branch }) => plan_command(branch),
         Some(Command::List) => list_command(),
         Some(Command::Config) => config_command(),
         Some(Command::Apps) => apps_command(),
@@ -1271,6 +1280,92 @@ fn review_meta_command() -> Result<()> {
     match meta_prompt {
         Some(prompt) => println!("{}", prompt),
         None => println!("No meta reviewer prompt was set for the last review."),
+    }
+    Ok(())
+}
+
+fn plan_command(branch: Option<String>) -> Result<()> {
+    // Handle `mai plan input` and `mai plan meta` subcommands
+    match branch.as_deref() {
+        Some("input") => return plan_input_command(),
+        Some("meta") => return plan_meta_command(),
+        _ => {}
+    }
+
+    let current_dir = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
+
+    // Find config
+    let (config_path, project_config, project_path) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
+        .ok_or_else(|| MultiAiError::Config(
+            "Config not found in ~/.config/multi-ai-cli/. Run 'mai init' from your project directory to create one.".to_string()
+        ))?;
+
+    println!("Using config: {}", config_path.display());
+    let sp = spinner("Validating environment...");
+
+    // Check for gwt config
+    let _gwt_config_path = find_gwt_config_file(&project_path)
+        .ok_or_else(|| MultiAiError::Config(
+            format!("git-worktree-config.jsonc not found in {} or its ./main/ subdirectory. Please ensure this file exists.", project_path.display())
+        ))?;
+
+    let project_name = project_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
+        .to_string();
+
+    let worktree_manager = make_worktree_manager(&project_config, project_path.clone());
+
+    if !worktree_manager.has_gwt_cli() {
+        return Err(MultiAiError::Worktree(
+            "gwt CLI is not installed. Please install from https://github.com/mikko-kohtala/git-worktree-cli".to_string()
+        ));
+    }
+
+    sp.finish_with_message("Environment validated");
+
+    plan::run_plan(
+        project_config,
+        project_name,
+        project_path,
+        worktree_manager,
+        branch,
+        &config_path,
+    )
+}
+
+fn plan_input_command() -> Result<()> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
+
+    let (config_path, _, _) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
+        .ok_or_else(|| MultiAiError::Config(
+            "Config not found in ~/.config/multi-ai-cli/. Run 'mai init' from your project directory to create one.".to_string()
+        ))?;
+
+    let (plan_prompt, _) = plan::load_plan_data(&config_path)?;
+    println!("{}", plan_prompt);
+    Ok(())
+}
+
+fn plan_meta_command() -> Result<()> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
+
+    let (config_path, _, _) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
+        .ok_or_else(|| MultiAiError::Config(
+            "Config not found in ~/.config/multi-ai-cli/. Run 'mai init' from your project directory to create one.".to_string()
+        ))?;
+
+    let (_, meta_prompt) = plan::load_plan_data(&config_path)?;
+    match meta_prompt {
+        Some(prompt) => println!("{}", prompt),
+        None => println!("No meta planner prompt was set for the last plan."),
     }
     Ok(())
 }

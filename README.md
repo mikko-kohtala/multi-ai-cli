@@ -126,7 +126,7 @@ Or create it manually:
 
 ## Usage
 
-**Important**: `mai add`, `mai continue`, `mai resume`, `mai remove`, and `mai send` should be run from within your project (or a worktree). Config is discovered from `~/.config/multi-ai-cli/` using the git remote URL.
+**Important**: `mai add`, `mai continue`, `mai resume`, `mai remove`, `mai send`, and `mai plan` should be run from within your project (or a worktree). Config is discovered from `~/.config/multi-ai-cli/` using the git remote URL.
 
 ### Create worktrees and terminal sessions
 
@@ -233,6 +233,20 @@ Most terminal emulators don't transmit the Shift modifier with Enter by default.
 
 - Configure **Option+Enter** or **Ctrl+J** as alternatives
 - Use external editors and copy-paste for longer inputs
+
+### Multi-AI collaborative planning
+
+The `mai plan` command launches an interactive TUI for collaborative planning across multiple AI tools:
+
+```bash
+cd ~/code/my-project
+mai plan                # Interactive branch selection and planning
+mai plan feat/my-branch # Skip branch selection
+mai plan input          # Print last saved plan prompt
+mai plan meta           # Print last saved meta planner prompt
+```
+
+Each selected AI planner creates an independent implementation plan (saved to `PLAN.md`), then the meta planner synthesizes all plans into a unified `PLAN_UNIFIED.md`. The planning prompt references [superpowers skills](https://github.com/anthropics/superpowers) for structured brainstorming and plan writing.
 
 ## Terminal Layout
 

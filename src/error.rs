@@ -27,6 +27,9 @@ pub enum MultiAiError {
     #[error("Review error: {0}")]
     Review(String),
 
+    #[error("Plan error: {0}")]
+    Plan(String),
+
     #[error("Command execution failed: {0}")]
     CommandFailed(String),
 }
