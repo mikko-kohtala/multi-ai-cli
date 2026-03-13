@@ -49,16 +49,23 @@
   },
   {
     "name": "codex",
+    "slug": "codex-yolo-gpt-5.4-xhigh",
+    "command": "codex --yolo --model gpt-5.4 --config model_reasoning_effort='xhigh'",
+    "default": false,
+    "description": "YOLO + gpt-5.4 model - high reasoning with auto-approval",
+  },
+  {
+    "name": "codex",
     "slug": "codex-yolo-gpt-5.3-codex",
     "command": "codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='high'",
-    "default": false,
+    "default": true,
     "description": "YOLO + gpt-5.3-codex model - high reasoning with auto-approval",
   },
   {
     "name": "codex",
     "slug": "codex-gpt-5.3-codex-xhigh",
     "command": "codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='xhigh'",
-    "default": true,
+    "default": false,
     "description": "YOLO + gpt-5.3-codex model - extra high reasoning with auto-approval",
   },
   {
@@ -77,14 +84,14 @@
     "name": "amp",
     "slug": "amp-yolo",
     "command": "amp --dangerously-allow-all",
-    "default": true,
+    "default": false,
     "description": "Allow all operations - bypasses safety checks",
   },
   {
     "name": "opencode",
     "slug": "opencode",
     "command": "opencode",
-    "default": true,
+    "default": false,
     "description": "Standard mode - interactive approval workflow",
   },
   {
@@ -97,7 +104,7 @@
     "name": "cursor-agent",
     "slug": "cursor-agent-force",
     "command": "cursor-agent --force",
-    "default": true,
+    "default": false,
     "description": "Force mode - executes without confirmation",
   },
   {
