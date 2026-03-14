@@ -100,11 +100,10 @@ cargo fmt      # Format code according to Rust standards
    - `TmuxLayout`: internal enum used by tmux adapter (`SingleWindow`, `MultiWindow`)
    - `AiApp` struct: Defines AI tool name and full command to execute
 
-3. **worktree.rs**: `WorktreeManager` interfaces with gwt CLI to:
+3. **worktree.rs**: `WorktreeManager` manages git worktrees directly via `git worktree` commands:
    - Create git worktrees for each AI app with naming pattern: `<branch-prefix>-<ai-app>`
-   - Validate gwt CLI availability and project initialization
-   - Check for `git-worktree-config.jsonc` (or `.yaml` for backward compatibility)
-   - Remove worktrees during cleanup
+   - Smart branch detection: handles existing local, remote-only, and new branches
+   - Remove worktrees and clean up branches during cleanup
 
 4. **iterm2.rs**: `ITerm2Manager` handles iTerm2 automation (default):
    - Creates a single tab with all AI apps
@@ -126,14 +125,14 @@ cargo fmt      # Format code according to Rust standards
 ### Key Implementation Details
 
 - **Centralized Config**: All configs live in `~/.config/multi-ai-cli/`, named by git remote URL. Each config requires `project_path`.
-- **Required Files**: Both a mai config in `~/.config/multi-ai-cli/` and `git-worktree-config.jsonc` (managed by gwt) must exist
+- **Required Files**: A mai config in `~/.config/multi-ai-cli/` must exist. Optional `worktrees_path` field controls where worktrees are created (defaults to project directory).
 - **Tmux Pane Targeting**: Capture `#{pane_id}` of the original pane before splitting and target by ID. This works regardless of `base-index`/`pane-base-index`.
 - **Mode Defaults by OS**: If not specified via CLI or config, defaults to iTerm2 on macOS and tmux single-window elsewhere.
 - **Shell Initialization**: A 500ms delay ensures the shell is ready before sending commands
 - **JSONC Support**: Configuration files use JSONC format (JSON with comments)
 
 ### Dependencies
-- External tools: gwt CLI, tmux
+- External tools: git, tmux
 - Key crates: clap (CLI), serde (serialization), jsonc-parser (JSONC support), thiserror (errors)
 
 ## Known Issues & Fixes

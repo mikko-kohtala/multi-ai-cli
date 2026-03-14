@@ -48,9 +48,7 @@ enum AppState {
 
 impl WizardState {
     fn new(project_path: PathBuf) -> Result<Self> {
-        // Auto-detect worktrees_path from gwt config
-        let worktrees_path =
-            crate::worktree::WorktreeManager::read_worktrees_path_public(&project_path);
+        let worktrees_path = None;
 
         Ok(Self {
             current_step: WizardStep::SelectMode {

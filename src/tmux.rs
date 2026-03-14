@@ -234,14 +234,15 @@ impl TmuxManager {
         Ok(output.status.success())
     }
 
-    pub fn kill_session(&self) -> Result<()> {
+    /// Kill the tmux session. Returns `true` if a session was killed,
+    /// `false` if it didn't exist.
+    pub fn kill_session(&self) -> Result<bool> {
         if !self.is_tmux_installed() {
             return Err(MultiAiError::Tmux("tmux is not installed".to_string()));
         }
 
         if !self.session_exists()? {
-            // Session doesn't exist, which is fine for remove command
-            return Ok(());
+            return Ok(false);
         }
 
         let output = Command::new("tmux")
@@ -259,7 +260,7 @@ impl TmuxManager {
             )));
         }
 
-        Ok(())
+        Ok(true)
     }
 
     fn is_tmux_installed(&self) -> bool {

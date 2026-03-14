@@ -408,7 +408,7 @@ pub fn run_plan(
     println!("---\n");
 
     // Fetch once before parallel worktree creation to avoid concurrent fetch races.
-    // (gwt internally fetches, and parallel fetches can race on the same remote refs)
+    // (parallel worktree adds can race on fetching the same remote refs)
     print!("Fetching latest changes from origin... ");
     io::stdout().flush().ok();
     match Command::new("git")

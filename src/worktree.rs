@@ -3,6 +3,9 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// Protected branches that should never be deleted by remove operations.
+const PROTECTED_BRANCHES: &[&str] = &["main", "master", "develop", "dev"];
+
 pub struct WorktreeManager {
     project_path: PathBuf,
     worktrees_path: PathBuf,
@@ -10,8 +13,7 @@ pub struct WorktreeManager {
 
 impl WorktreeManager {
     pub fn new(project_path: PathBuf) -> Self {
-        let worktrees_path =
-            Self::read_worktrees_path(&project_path).unwrap_or_else(|| project_path.clone());
+        let worktrees_path = project_path.clone();
         Self {
             project_path,
             worktrees_path,
@@ -19,97 +21,11 @@ impl WorktreeManager {
     }
 
     /// Create a WorktreeManager with an explicit worktrees path override.
-    /// The override takes precedence over gwt config discovery.
     pub fn with_worktrees_path(project_path: PathBuf, worktrees_path: PathBuf) -> Self {
         Self {
             project_path,
             worktrees_path,
         }
-    }
-
-    /// Read the worktreesPath from gwt config file (public wrapper for init)
-    pub fn read_worktrees_path_public(project_path: &Path) -> Option<PathBuf> {
-        Self::read_worktrees_path(project_path)
-    }
-
-    /// Read the worktreesPath from gwt config file
-    fn read_worktrees_path(project_path: &Path) -> Option<PathBuf> {
-        // Try local config first
-        let local_config = project_path.join("git-worktree-config.jsonc");
-        if let Some(path) = Self::parse_worktrees_path_from_file(&local_config) {
-            return Some(path);
-        }
-
-        // Try ./main/ subdirectory
-        let main_config = project_path.join("main").join("git-worktree-config.jsonc");
-        if let Some(path) = Self::parse_worktrees_path_from_file(&main_config) {
-            return Some(path);
-        }
-
-        // Try global gwt configs
-        let home_dir = dirs::home_dir()?;
-        let gwt_projects_dir = home_dir
-            .join(".config")
-            .join("git-worktree-cli")
-            .join("projects");
-        if !gwt_projects_dir.exists() {
-            return None;
-        }
-
-        let project_path_canonical = project_path.canonicalize().ok();
-
-        for entry in std::fs::read_dir(&gwt_projects_dir).ok()?.flatten() {
-            let path = entry.path();
-            if path.extension().map(|e| e == "jsonc").unwrap_or(false) {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Ok(Some(serde_json::Value::Object(map))) =
-                        jsonc_parser::parse_to_serde_value(&content, &Default::default())
-                    {
-                        // Check if this config matches our project path
-                        let matches = if let Some(serde_json::Value::String(proj_path)) =
-                            map.get("projectPath")
-                        {
-                            let config_proj_path = PathBuf::from(proj_path);
-                            if let Some(ref proj_canonical) = project_path_canonical {
-                                if let Ok(config_canonical) = config_proj_path.canonicalize() {
-                                    proj_canonical == &config_canonical
-                                } else {
-                                    project_path == &config_proj_path
-                                }
-                            } else {
-                                project_path == &config_proj_path
-                            }
-                        } else {
-                            false
-                        };
-
-                        if matches {
-                            if let Some(serde_json::Value::String(wt_path)) =
-                                map.get("worktreesPath")
-                            {
-                                return Some(PathBuf::from(wt_path));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    fn parse_worktrees_path_from_file(config_path: &Path) -> Option<PathBuf> {
-        if !config_path.exists() {
-            return None;
-        }
-        let content = std::fs::read_to_string(config_path).ok()?;
-        let parsed = jsonc_parser::parse_to_serde_value(&content, &Default::default()).ok()??;
-        if let serde_json::Value::Object(map) = parsed {
-            if let Some(serde_json::Value::String(wt_path)) = map.get("worktreesPath") {
-                return Some(PathBuf::from(wt_path));
-            }
-        }
-        None
     }
 
     pub fn project_path(&self) -> &Path {
@@ -123,20 +39,40 @@ impl WorktreeManager {
     pub fn add_worktree(&self, branch_name: &str) -> Result<PathBuf> {
         let worktree_path = self.worktrees_path.join(branch_name);
 
-        if !self.has_gwt_cli() {
-            return Err(MultiAiError::Worktree(
-                "gwt CLI is not installed or not in PATH".to_string(),
-            ));
+        // Determine branch existence and build the right git worktree add command
+        let local_exists = self.branch_exists_locally(branch_name);
+        let remote_exists = self.branch_exists_remotely(branch_name);
+
+        let mut cmd = Command::new("git");
+        cmd.arg("worktree").arg("add");
+
+        if local_exists {
+            // Local branch exists — just create worktree pointing to it
+            cmd.arg(&worktree_path).arg(branch_name);
+        } else if remote_exists {
+            // Remote branch exists — create local tracking branch
+            cmd.arg("-b")
+                .arg(branch_name)
+                .arg(&worktree_path)
+                .arg(format!("origin/{}", branch_name));
+        } else {
+            // Brand new branch — create from default branch
+            let default_branch = crate::git::get_default_branch(&self.project_path);
+            cmd.arg("--no-track")
+                .arg("-b")
+                .arg(branch_name)
+                .arg(&worktree_path)
+                .arg(format!("origin/{}", default_branch));
         }
 
-        let mut child = Command::new("gwt")
-            .arg("add")
-            .arg(branch_name)
+        let mut child = cmd
             .current_dir(&self.project_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to execute gwt: {}", e)))?;
+            .map_err(|e| {
+                MultiAiError::CommandFailed(format!("Failed to execute git worktree add: {}", e))
+            })?;
 
         // Stream stdout
         if let Some(stdout) = child.stdout.take() {
@@ -146,13 +82,11 @@ impl WorktreeManager {
             }
         }
 
-        // Wait for the process to complete and check status
-        let status = child
-            .wait()
-            .map_err(|e| MultiAiError::CommandFailed(format!("Failed to wait for gwt: {}", e)))?;
+        let status = child.wait().map_err(|e| {
+            MultiAiError::CommandFailed(format!("Failed to wait for git worktree add: {}", e))
+        })?;
 
         if !status.success() {
-            // Capture any stderr output
             let mut stderr_msg = String::new();
             if let Some(stderr) = child.stderr.take() {
                 let reader = BufReader::new(stderr);
@@ -175,14 +109,6 @@ impl WorktreeManager {
         Ok(worktree_path)
     }
 
-    pub fn has_gwt_cli(&self) -> bool {
-        Command::new("gwt")
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
     pub fn remove_worktree(&self, branch_name: &str) -> Result<()> {
         self.remove_worktree_impl(branch_name, true)
     }
@@ -192,45 +118,41 @@ impl WorktreeManager {
     }
 
     fn remove_worktree_impl(&self, branch_name: &str, verbose: bool) -> Result<()> {
-        if !self.has_gwt_cli() {
-            return Err(MultiAiError::Worktree(
-                "gwt CLI is not installed or not in PATH".to_string(),
-            ));
-        }
+        let worktree_path = self.worktrees_path.join(branch_name);
 
-        let mut child = Command::new("gwt")
+        // Remove the worktree
+        let mut cmd = Command::new("git");
+        cmd.arg("worktree")
             .arg("remove")
-            .arg(branch_name)
             .arg("--force")
-            .current_dir(&self.project_path)
-            .stdout(if verbose {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                MultiAiError::CommandFailed(format!("Failed to execute gwt remove: {}", e))
-            })?;
+            .arg(&worktree_path)
+            .current_dir(&self.project_path);
 
-        // Stream stdout only in verbose mode
         if verbose {
-            if let Some(stdout) = child.stdout.take() {
-                let reader = BufReader::new(stdout);
-                for line in reader.lines().map_while(|r| r.ok()) {
-                    println!("    {}", line);
-                }
+            cmd.stdout(Stdio::piped());
+        } else {
+            cmd.stdout(Stdio::null());
+        }
+        cmd.stderr(Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| {
+            MultiAiError::CommandFailed(format!("Failed to execute git worktree remove: {}", e))
+        })?;
+
+        if verbose
+            && let Some(stdout) = child.stdout.take()
+        {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().map_while(|r| r.ok()) {
+                println!("    {}", line);
             }
         }
 
-        // Wait for the process to complete and check status
         let status = child.wait().map_err(|e| {
-            MultiAiError::CommandFailed(format!("Failed to wait for gwt remove: {}", e))
+            MultiAiError::CommandFailed(format!("Failed to wait for git worktree remove: {}", e))
         })?;
 
         if !status.success() {
-            // Capture any stderr output
             let mut stderr_msg = String::new();
             if let Some(stderr) = child.stderr.take() {
                 let reader = BufReader::new(stderr);
@@ -250,15 +172,69 @@ impl WorktreeManager {
             )));
         }
 
+        // Delete the branch (skip protected branches)
+        if !PROTECTED_BRANCHES.contains(&branch_name) {
+            let delete_result = Command::new("git")
+                .args(["branch", "-D", branch_name])
+                .current_dir(&self.project_path)
+                .output();
+
+            if verbose {
+                match delete_result {
+                    Ok(output) if output.status.success() => {
+                        println!("    Deleted branch {}", branch_name);
+                    }
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        eprintln!("    Warning: could not delete branch: {}", stderr.trim());
+                    }
+                    Err(e) => {
+                        eprintln!("    Warning: could not delete branch: {}", e);
+                    }
+                }
+            }
+        }
+
+        // Prune stale worktree references
+        let _ = Command::new("git")
+            .args(["worktree", "prune"])
+            .current_dir(&self.project_path)
+            .output();
+
         Ok(())
     }
 
     pub fn worktrees_exist(&self, branch_prefix: &str, ai_app_names: &[String]) -> bool {
-        // Check if all worktree directories exist for the given branch prefix and AI apps
         ai_app_names.iter().all(|app_name| {
             let branch_name = format!("{}-{}", branch_prefix, app_name);
             let worktree_path = self.worktrees_path.join(&branch_name);
             worktree_path.exists() && worktree_path.is_dir()
         })
+    }
+
+    fn branch_exists_locally(&self, branch_name: &str) -> bool {
+        Command::new("git")
+            .args(["rev-parse", "--verify", &format!("refs/heads/{}", branch_name)])
+            .current_dir(&self.project_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    fn branch_exists_remotely(&self, branch_name: &str) -> bool {
+        Command::new("git")
+            .args([
+                "rev-parse",
+                "--verify",
+                &format!("refs/remotes/origin/{}", branch_name),
+            ])
+            .current_dir(&self.project_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
 }

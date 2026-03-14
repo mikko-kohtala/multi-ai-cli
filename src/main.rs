@@ -244,106 +244,6 @@ fn system_default_mode() -> Mode {
     }
 }
 
-/// Find git-worktree-config.jsonc by checking:
-/// 1. Current directory
-/// 2. ./main/ subdirectory
-/// 3. Global gwt config by repo URL: ~/.config/git-worktree-cli/projects/{repo-name}.jsonc
-/// 4. Global gwt config by path match (worktreesPath or projectPath in config)
-fn find_gwt_config_file(base_path: &Path) -> Option<PathBuf> {
-    // First check current directory
-    let current_path = base_path.join("git-worktree-config.jsonc");
-    if current_path.exists() {
-        return Some(current_path);
-    }
-
-    // Then check ./main/ subdirectory
-    let main_path = base_path.join("main").join("git-worktree-config.jsonc");
-    if main_path.exists() {
-        return Some(main_path);
-    }
-
-    // Check global gwt configs - gwt uses ~/.config/ not the platform config dir
-    let home_dir = dirs::home_dir()?;
-    let gwt_projects_dir = home_dir
-        .join(".config")
-        .join("git-worktree-cli")
-        .join("projects");
-    if !gwt_projects_dir.exists() {
-        return None;
-    }
-
-    // Try to find by repo URL first
-    if let Some(repo_url) = git::get_remote_origin_url(base_path) {
-        let config_filename = format!("{}.jsonc", git::generate_config_filename(&repo_url));
-        let global_path = gwt_projects_dir.join(&config_filename);
-        if global_path.exists() {
-            return Some(global_path);
-        }
-    }
-
-    // Search all global gwt configs for matching worktreesPath or projectPath
-    let base_path_canonical = base_path.canonicalize().ok();
-
-    // Helper to check if a config path matches the base path
-    let check_path_match =
-        |base_canonical: &Option<PathBuf>, base: &Path, config_path: &PathBuf| -> bool {
-            if let Some(base_can) = base_canonical {
-                if let Ok(config_canonical) = config_path.canonicalize() {
-                    base_can == &config_canonical || base_can.starts_with(&config_canonical)
-                } else {
-                    base == config_path || base.starts_with(config_path)
-                }
-            } else {
-                base == config_path || base.starts_with(config_path)
-            }
-        };
-
-    for entry in std::fs::read_dir(&gwt_projects_dir).ok()?.flatten() {
-        let path = entry.path();
-
-        if path.extension().map(|e| e == "jsonc").unwrap_or(false) {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(Some(serde_json::Value::Object(map))) =
-                    jsonc_parser::parse_to_serde_value(&content, &Default::default())
-                {
-                    // Check both worktreesPath and projectPath
-                    // gwt uses camelCase: worktreesPath, projectPath
-                    let matches = {
-                        let mut found = false;
-
-                        // Check worktreesPath
-                        if let Some(serde_json::Value::String(worktrees_path)) =
-                            map.get("worktreesPath")
-                        {
-                            let wt_path = PathBuf::from(worktrees_path);
-                            found = check_path_match(&base_path_canonical, base_path, &wt_path);
-                        }
-
-                        // Check projectPath
-                        if !found {
-                            if let Some(serde_json::Value::String(project_path)) =
-                                map.get("projectPath")
-                            {
-                                let proj_path = PathBuf::from(project_path);
-                                found =
-                                    check_path_match(&base_path_canonical, base_path, &proj_path);
-                            }
-                        }
-
-                        found
-                    };
-
-                    if matches {
-                        return Some(path);
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
 /// Create a WorktreeManager, using the mai config's worktrees_path if set.
 fn make_worktree_manager(project_config: &ProjectConfig, project_path: PathBuf) -> WorktreeManager {
     if let Some(ref wt_path) = project_config.worktrees_path {
@@ -479,10 +379,11 @@ fn interactive_remove_command(
     for prefix in &selected {
         let tmux_manager = TmuxManager::new(&project_name, prefix);
         match tmux_manager.kill_session() {
-            Ok(_) => println!(
-                "  ✓ Tmux session '{}-{}' removed or not present",
+            Ok(true) => println!(
+                "  ✓ Tmux session '{}-{}' removed",
                 project_name, prefix
             ),
+            Ok(false) => {} // session didn't exist, nothing to report
             Err(e) => eprintln!(
                 "  ⚠ Tmux session '{}-{}' cleanup: {}",
                 project_name, prefix, e
@@ -651,25 +552,11 @@ fn create_command(
     println!("Using config: {}", config_path.display());
     let sp = spinner("Validating environment...");
 
-    // Check for git-worktree-config.jsonc (at the project path)
-    let _gwt_config_path = find_gwt_config_file(&project_path)
-        .ok_or_else(|| MultiAiError::Config(
-            format!("git-worktree-config.jsonc not found in {} or its ./main/ subdirectory. Please ensure this file exists.", project_path.display())
-        ))?;
-
     let project_name = project_path
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
         .to_string();
-
-    let worktree_manager = make_worktree_manager(&project_config, project_path.clone());
-
-    if !worktree_manager.has_gwt_cli() {
-        return Err(MultiAiError::Worktree(
-            "gwt CLI is not installed. Please install from https://github.com/mikko-kohtala/git-worktree-cli".to_string()
-        ));
-    }
 
     sp.finish_with_message("Environment validated");
 
@@ -693,7 +580,7 @@ fn create_command(
     };
 
     // Fetch once before parallel worktree creation to avoid concurrent fetch race conditions
-    // (gwt internally fetches, and parallel fetches race to update the same remote refs)
+    // (parallel worktree adds can race on fetching the same remote refs)
     print!("Fetching latest changes from origin... ");
     io::stdout().flush().ok();
     match std::process::Command::new("git")
@@ -902,24 +789,12 @@ fn remove_command(
     println!("Using config: {}", config_path.display());
     let sp = spinner("Validating environment...");
 
-    // Check for git-worktree-config.jsonc (at the project path)
-    let _gwt_config_path = find_gwt_config_file(&project_path)
-        .ok_or_else(|| MultiAiError::Config(
-            format!("git-worktree-config.jsonc not found in {} or its ./main/ subdirectory. Please ensure this file exists.", project_path.display())
-        ))?;
-
     let project_name = project_path
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| MultiAiError::Config("Invalid project path".to_string()))?
         .to_string();
     let worktree_manager = make_worktree_manager(&project_config, project_path.clone());
-
-    if !worktree_manager.has_gwt_cli() {
-        return Err(MultiAiError::Worktree(
-            "gwt CLI is not installed. Please install from https://github.com/mikko-kohtala/git-worktree-cli".to_string()
-        ));
-    }
 
     sp.finish_with_message("Environment validated");
 
@@ -980,14 +855,13 @@ fn remove_command(
     }
 
     // Best-effort: try to kill tmux session regardless of configured mode.
-    // If tmux isn't installed or the session doesn't exist, this will no-op or warn.
     let tmux_manager = TmuxManager::new(&project_name, &branch_prefix);
-    println!(
-        "Removing tmux session '{}-{}' (if present)...",
-        project_name, branch_prefix
-    );
     match tmux_manager.kill_session() {
-        Ok(_) => println!("  ✓ Tmux session removed or not present"),
+        Ok(true) => println!(
+            "  ✓ Tmux session '{}-{}' removed",
+            project_name, branch_prefix
+        ),
+        Ok(false) => {} // session didn't exist, nothing to report
         Err(e) => eprintln!("  ⚠ Tmux cleanup skipped: {}", e),
     }
 
@@ -1028,12 +902,6 @@ fn continue_command(
 
     println!("Using config: {}", config_path.display());
     let sp = spinner("Validating environment...");
-
-    // Check for git-worktree-config.jsonc (at the project path)
-    let _gwt_config_path = find_gwt_config_file(&project_path)
-        .ok_or_else(|| MultiAiError::Config(
-            format!("git-worktree-config.jsonc not found in {} or its ./main/ subdirectory. Please ensure this file exists.", project_path.display())
-        ))?;
 
     let project_name = project_path
         .file_name()
@@ -1219,12 +1087,6 @@ fn review_command(branch: Option<String>) -> Result<()> {
     println!("Using config: {}", config_path.display());
     let sp = spinner("Validating environment...");
 
-    // Check for gwt config
-    let _gwt_config_path = find_gwt_config_file(&project_path)
-        .ok_or_else(|| MultiAiError::Config(
-            format!("git-worktree-config.jsonc not found in {} or its ./main/ subdirectory. Please ensure this file exists.", project_path.display())
-        ))?;
-
     let project_name = project_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -1232,12 +1094,6 @@ fn review_command(branch: Option<String>) -> Result<()> {
         .to_string();
 
     let worktree_manager = make_worktree_manager(&project_config, project_path.clone());
-
-    if !worktree_manager.has_gwt_cli() {
-        return Err(MultiAiError::Worktree(
-            "gwt CLI is not installed. Please install from https://github.com/mikko-kohtala/git-worktree-cli".to_string()
-        ));
-    }
 
     sp.finish_with_message("Environment validated");
 
@@ -1305,12 +1161,6 @@ fn plan_command(branch: Option<String>) -> Result<()> {
     println!("Using config: {}", config_path.display());
     let sp = spinner("Validating environment...");
 
-    // Check for gwt config
-    let _gwt_config_path = find_gwt_config_file(&project_path)
-        .ok_or_else(|| MultiAiError::Config(
-            format!("git-worktree-config.jsonc not found in {} or its ./main/ subdirectory. Please ensure this file exists.", project_path.display())
-        ))?;
-
     let project_name = project_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -1318,12 +1168,6 @@ fn plan_command(branch: Option<String>) -> Result<()> {
         .to_string();
 
     let worktree_manager = make_worktree_manager(&project_config, project_path.clone());
-
-    if !worktree_manager.has_gwt_cli() {
-        return Err(MultiAiError::Worktree(
-            "gwt CLI is not installed. Please install from https://github.com/mikko-kohtala/git-worktree-cli".to_string()
-        ));
-    }
 
     sp.finish_with_message("Environment validated");
 
