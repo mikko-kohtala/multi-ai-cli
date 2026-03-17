@@ -256,6 +256,8 @@ struct ReviewData {
     meta_prompt: Option<String>,
     #[serde(default)]
     base_branch: Option<String>,
+    #[serde(default)]
+    unified_review_path: Option<String>,
 }
 
 /// Derive the review data file path from a config file path.
@@ -274,11 +276,13 @@ fn save_review_data(
     review_prompt: &str,
     meta_prompt: Option<&str>,
     base_branch: Option<&str>,
+    unified_review_path: Option<&str>,
 ) -> Result<()> {
     let data = ReviewData {
         review_prompt: review_prompt.to_string(),
         meta_prompt: meta_prompt.map(|s| s.to_string()),
         base_branch: base_branch.map(|s| s.to_string()),
+        unified_review_path: unified_review_path.map(|s| s.to_string()),
     };
     let json = serde_json::to_string_pretty(&data)
         .map_err(|e| MultiAiError::Review(format!("Failed to serialize review data: {}", e)))?;
@@ -299,6 +303,20 @@ pub fn load_review_data(config_path: &Path) -> Result<(String, Option<String>)> 
     let data: ReviewData = serde_json::from_str(&content)
         .map_err(|e| MultiAiError::Review(format!("Failed to parse review data: {}", e)))?;
     Ok((data.review_prompt, data.meta_prompt))
+}
+
+pub fn load_unified_review_path(config_path: &Path) -> Result<Option<String>> {
+    let path = review_data_path(config_path);
+    let content = std::fs::read_to_string(&path).map_err(|e| {
+        MultiAiError::Review(format!(
+            "No saved review data found ({}): {}",
+            path.display(),
+            e
+        ))
+    })?;
+    let data: ReviewData = serde_json::from_str(&content)
+        .map_err(|e| MultiAiError::Review(format!("Failed to parse review data: {}", e)))?;
+    Ok(data.unified_review_path)
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +395,20 @@ pub fn run_review(
             review_locations.push(format!("- {}: {}/REVIEW.md", app.name, path.display()));
         }
     }
+    // Compute the unified review file path from the first meta reviewer
+    let mut unified_review_path: Option<String> = None;
+    for (i, tool) in wizard.selected_tools.iter().enumerate() {
+        if tool.tag == ReviewTag::Meta {
+            let branch_name = format!("{}-{}-01", branch_prefix, review_apps[i].slug());
+            let path = worktree_manager
+                .worktrees_path()
+                .join(&branch_name)
+                .join("REVIEW_SUMMARY_UNIFIED.md");
+            unified_review_path = Some(path.to_string_lossy().to_string());
+            break;
+        }
+    }
+
     let meta_prompt = if !review_locations.is_empty() {
         Some(
             settings
@@ -394,6 +426,7 @@ pub fn run_review(
         &review_prompt,
         meta_prompt.as_deref(),
         Some(&wizard.base_branch),
+        unified_review_path.as_deref(),
     )?;
 
     println!("\n--- Review Prompt ---");

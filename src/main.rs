@@ -1071,6 +1071,7 @@ fn review_command(branch: Option<String>) -> Result<()> {
     match branch.as_deref() {
         Some("input") => return review_input_command(),
         Some("meta") => return review_meta_command(),
+        Some("copy-unified-path") => return review_copy_unified_path_command(),
         _ => {}
     }
 
@@ -1138,6 +1139,79 @@ fn review_meta_command() -> Result<()> {
         None => println!("No meta reviewer prompt was set for the last review."),
     }
     Ok(())
+}
+
+fn review_copy_unified_path_command() -> Result<()> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
+
+    let (config_path, _, _) = ProjectConfig::find_config(&current_dir)
+        .map_err(|e| MultiAiError::Config(format!("Failed to find config: {}", e)))?
+        .ok_or_else(|| MultiAiError::Config(
+            "Config not found in ~/.config/multi-ai-cli/. Run 'mai init' from your project directory to create one.".to_string()
+        ))?;
+
+    let unified_path = review::load_unified_review_path(&config_path)?;
+    match unified_path {
+        Some(path) => {
+            copy_to_clipboard(&path)?;
+            println!("{}", path);
+        }
+        None => {
+            eprintln!("No unified review path was saved for the last review.");
+            eprintln!("This may happen if no meta reviewer was selected.");
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+fn copy_to_clipboard(text: &str) -> Result<()> {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("pbcopy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                if let Some(ref mut stdin) = child.stdin {
+                    stdin.write_all(text.as_bytes())?;
+                }
+                child.wait()
+            })
+    } else {
+        std::process::Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                if let Some(ref mut stdin) = child.stdin {
+                    stdin.write_all(text.as_bytes())?;
+                }
+                child.wait()
+            })
+            .or_else(|_| {
+                std::process::Command::new("xsel")
+                    .arg("--clipboard")
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                    .and_then(|mut child| {
+                        if let Some(ref mut stdin) = child.stdin {
+                            stdin.write_all(text.as_bytes())?;
+                        }
+                        child.wait()
+                    })
+            })
+    };
+
+    match result {
+        Ok(status) if status.success() => Ok(()),
+        Ok(_) => Err(MultiAiError::CommandFailed(
+            "Clipboard command failed".to_string(),
+        )),
+        Err(e) => {
+            eprintln!("Warning: Could not copy to clipboard: {}", e);
+            Ok(())
+        }
+    }
 }
 
 fn plan_command(branch: Option<String>) -> Result<()> {
