@@ -27,7 +27,7 @@ The following AI development tools are supported:
 
 ## Prerequisites
 
-- [gwt CLI](https://github.com/mikko-kohtala/git-worktree-cli) - Git worktree management tool
+- [it2 CLI](https://github.com/mkusaka/it2) - iTerm2 CLI tool (required for `mai review` and `mai plan` on macOS). Install with: `uvx install it2`
 - iTerm2 (only if you plan to use `mode: "iterm2"` on macOS)
 - tmux (required when `mode` is a tmux layout, when overriding via `--mode`/`--tmux`, or for `mai send`)
 

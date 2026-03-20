@@ -4,6 +4,8 @@ mod git;
 mod init;
 #[cfg(target_os = "macos")]
 mod iterm2;
+#[cfg(target_os = "macos")]
+mod iterm2_layout;
 mod picker;
 mod plan;
 mod review;

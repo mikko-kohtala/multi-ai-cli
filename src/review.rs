@@ -472,16 +472,36 @@ pub fn run_review(
         println!("Note: AI review prompts will NOT be sent automatically.");
     }
 
-    // 6. Create iTerm2 layout, launch tools, and send prompts via AppleScript
+    // 6. Create iTerm2 layout, launch tools, and send prompts via it2
     println!("Creating iTerm2 layout and launching tools...");
-    create_iterm2_layout_applescript(
-        &wizard,
-        &review_apps,
-        &worktree_paths,
-        &review_prompt,
-        meta_prompt.as_deref(),
-        &branch_prefix,
-    )?;
+    {
+        use crate::iterm2_layout::{ColumnSpec, LayoutSpec, PaneTag, create_iterm2_layout};
+
+        let columns: Vec<ColumnSpec> = wizard
+            .selected_tools
+            .iter()
+            .enumerate()
+            .map(|(i, tool)| {
+                let (app, path) = &worktree_paths[i];
+                ColumnSpec {
+                    app: app.clone(),
+                    worktree_path: path.clone(),
+                    tag: match tool.tag {
+                        ReviewTag::Ai => PaneTag::Ai,
+                        ReviewTag::Meta => PaneTag::Meta,
+                    },
+                }
+            })
+            .collect();
+
+        create_iterm2_layout(&LayoutSpec {
+            columns,
+            ai_prompt: review_prompt.clone(),
+            meta_prompt: meta_prompt.clone(),
+            send_prompts: wizard.send_prompts,
+            tab_title: branch_prefix.clone(),
+        })?;
+    }
 
     println!(
         "\nReview session '{}-{}' started in iTerm2.",
@@ -1676,201 +1696,3 @@ fn create_review_worktrees(
     Ok(paths)
 }
 
-// ---------------------------------------------------------------------------
-// iTerm2 layout creation via AppleScript (single invocation)
-// ---------------------------------------------------------------------------
-
-/// Escape a string for embedding in an AppleScript double-quoted string.
-/// Newlines are replaced with `" & return & "` so multi-line text is
-/// concatenated properly instead of breaking the string literal.
-fn applescript_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\" & return & \"")
-}
-
-fn create_iterm2_layout_applescript(
-    wizard: &ReviewWizardState,
-    review_apps: &[AiApp],
-    worktree_paths: &[(AiApp, String)],
-    review_prompt: &str,
-    meta_prompt: Option<&str>,
-    branch_prefix: &str,
-) -> Result<()> {
-    if worktree_paths.is_empty() {
-        return Ok(());
-    }
-
-    let num_apps = review_apps.len();
-
-    let mut script = String::from(
-        r#"
-tell application "iTerm"
-    tell current window
-        create tab with default profile
-        tell current session"#,
-    );
-
-    // --- Create vertical splits for columns ---
-    for i in 2..=num_apps {
-        if i == 2 {
-            script.push_str("\n            set col2 to (split vertically with default profile)");
-        } else {
-            script.push_str(&format!(
-                "\n            tell col{}\n                set col{} to (split vertically with default profile)\n            end tell",
-                i - 1, i
-            ));
-        }
-    }
-
-    // --- Create horizontal splits for shell panes ---
-    // Column 1 (current session)
-    script.push_str("\n            set col1Shell to (split horizontally with default profile)");
-    // Other columns
-    for i in 2..=num_apps {
-        script.push_str(&format!(
-            "\n            tell col{}\n                set col{}Shell to (split horizontally with default profile)\n            end tell",
-            i, i
-        ));
-    }
-
-    // --- Launch AI tools and shells in each column ---
-    for (i, (app, path)) in worktree_paths.iter().enumerate() {
-        let col_num = i + 1;
-        let escaped_path = applescript_escape(path);
-        let escaped_cmd = applescript_escape(&app.command);
-
-        if i == 0 {
-            // First column: current session is the AI pane
-            script.push_str(&format!(
-                r#"
-            delay 2
-            write text "cd {} && {}""#,
-                escaped_path, escaped_cmd
-            ));
-            // Shell pane
-            script.push_str(&format!(
-                r#"
-            tell col1Shell
-                delay 1
-                write text "cd {}"
-            end tell"#,
-                escaped_path
-            ));
-        } else {
-            // Other columns: colN is the AI pane
-            script.push_str(&format!(
-                r#"
-            tell col{}
-                delay 1
-                write text "cd {} && {}"
-            end tell"#,
-                col_num, escaped_path, escaped_cmd
-            ));
-            // Shell pane
-            script.push_str(&format!(
-                r#"
-            tell col{}Shell
-                delay 1
-                write text "cd {}"
-            end tell"#,
-                col_num, escaped_path
-            ));
-        }
-    }
-
-    // --- Send review prompts to AI-tagged tools after a delay ---
-    // Each tool gets its own delay before prompt send so slower tools
-    // (codex, copilot) have time to initialise their input.
-    if wizard.send_prompts {
-        script.push_str("\n            delay 5");
-        for (i, tool) in wizard.selected_tools.iter().enumerate() {
-            if tool.tag != ReviewTag::Ai {
-                continue;
-            }
-            let col_num = i + 1;
-            let escaped_prompt = applescript_escape(review_prompt);
-            if i == 0 {
-                script.push_str(&format!(
-                    r#"
-            write text "{}"
-            delay 0.5
-            write text """#,
-                    escaped_prompt
-                ));
-            } else {
-                script.push_str(&format!(
-                    r#"
-            tell col{}
-                delay 1
-                write text "{}"
-                delay 0.5
-                write text ""
-            end tell"#,
-                    col_num, escaped_prompt
-                ));
-            }
-        }
-
-        // --- Type meta prompts into meta-tagged tools (without submitting) ---
-        // Meta reviewers get the prompt typed into their input so the user can
-        // review it before pressing Enter themselves.
-        if let Some(mp) = meta_prompt {
-            let escaped_meta = applescript_escape(mp);
-            for (i, tool) in wizard.selected_tools.iter().enumerate() {
-                if tool.tag != ReviewTag::Meta {
-                    continue;
-                }
-                let col_num = i + 1;
-                if i == 0 {
-                    script.push_str(&format!(
-                        r#"
-            delay 1
-            write text "{}" without newline"#,
-                        escaped_meta
-                    ));
-                } else {
-                    script.push_str(&format!(
-                        r#"
-            tell col{}
-                delay 1
-                write text "{}" without newline
-            end tell"#,
-                        col_num, escaped_meta
-                    ));
-                }
-            }
-        }
-    }
-
-    // --- Set tab title ---
-    script.push_str(&format!(
-        r#"
-            set name to "{}""#,
-        applescript_escape(branch_prefix)
-    ));
-
-    script.push_str(
-        r#"
-        end tell
-    end tell
-end tell"#,
-    );
-
-    // Execute
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .map_err(|e| MultiAiError::Review(format!("Failed to execute AppleScript: {}", e)))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(MultiAiError::Review(format!(
-            "AppleScript failed: {}",
-            stderr
-        )));
-    }
-
-    Ok(())
-}
