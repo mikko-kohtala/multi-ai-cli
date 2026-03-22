@@ -22,14 +22,16 @@ The following AI development tools are supported:
 - 🌳 **Git Worktree Management**: Automatically creates and manages git worktrees for each AI tool
 - 🖥️ **iTerm2 Integration** (`mode: "iterm2"` on macOS): Creates tabs with split panes for each AI application
 - 🎛️ **Tmux Support** (`mode: "tmux-single-window"` or `"tmux-multi-window"`): Creates tmux sessions with organized windows and panes
-- 🎨 **Flexible Configuration**: Define custom commands for each AI tool with local or global config discovery
+- 🔍 **Multi-AI Code Review** (`mai review`): Launch parallel code reviews across multiple AI tools with unified summaries
+- 📋 **Multi-AI Collaborative Planning** (`mai plan`): Generate implementation plans from multiple AI perspectives
+- 📨 **Send Commands** (`mai send`): Interactive TUI to send prompts to running AI sessions
+- 🎨 **Flexible Configuration**: Define custom commands for each AI tool with global or per-project config
 - 🚀 **Quick Setup**: Single command to set up multiple AI environments
 
 ## Prerequisites
 
-- [it2 CLI](https://github.com/mkusaka/it2) - iTerm2 CLI tool (required for `mai review` and `mai plan` on macOS). Install with: `uvx install it2`
-- iTerm2 (only if you plan to use `mode: "iterm2"` on macOS)
-- tmux (required when `mode` is a tmux layout, when overriding via `--mode`/`--tmux`, or for `mai send`)
+- **iTerm2** + [it2 CLI](https://github.com/mkusaka/it2) — only needed for iTerm2 mode and `mai review`/`mai plan` on macOS. Install it2 with: `uvx install it2`
+- **tmux** — needed for tmux modes, `mai send`, and as a fallback on non-macOS platforms
 
 ## Installation
 
@@ -37,7 +39,13 @@ The following AI development tools are supported:
 cargo install --path .
 ```
 
-Or build from source:
+Or use the Makefile, which also symlinks global config files (`apps.jsonc`, `settings.jsonc`) to `~/.config/multi-ai-cli/`:
+
+```bash
+make install
+```
+
+Or build from source without installing:
 
 ```bash
 cargo build --release
@@ -46,29 +54,16 @@ cargo build --release
 
 ## Configuration
 
-### Required Files
-
-The following files must be discoverable (local or global):
-
-1. `multi-ai-config.jsonc` - Defines AI applications and their commands
-2. `git-worktree-config.jsonc` - Git worktree configuration (created by `gwt init`)
-
 ### Config Discovery
 
-**multi-ai-config** — all configs live in `~/.config/multi-ai-cli/`, one file per project, named by git remote URL (e.g., `github_com_owner_repo.jsonc`). Discovery:
+All configs live in `~/.config/multi-ai-cli/`, one file per project, named by git remote URL (e.g., `github_com_owner_repo.jsonc`). Discovery:
 
 1. Git remote URL → generate filename → look up `~/.config/multi-ai-cli/{filename}.jsonc`
 2. Fallback: scan all `.jsonc` files for matching `project_path` or `worktrees_path`
 
 Each config requires a `project_path` field pointing to the main git repository. Run `mai init` from your project to create one.
 
-**git-worktree-config.jsonc search order** (managed by gwt):
-
-- Current directory
-- `./main/` subdirectory
-- Global gwt configs in `~/.config/git-worktree-cli/projects/*.jsonc` (matched by repo URL or `worktreesPath`)
-
-### Setting up multi-ai-config.jsonc
+### Setting up a project config
 
 You can create the config file interactively:
 
@@ -76,79 +71,84 @@ You can create the config file interactively:
 mai init
 ```
 
-Or create it manually:
+Or create it manually at `~/.config/multi-ai-cli/{project}.jsonc`:
 
 ```jsonc
 {
   "project_path": "/Users/you/code/my-project",
   "terminals_per_column": 2, // Number of terminal panes per column (first is AI command, rest are shells)
   "mode": "iterm2", // Optional: iterm2 | tmux-single-window | tmux-multi-window (defaults: macOS→iterm2, others→tmux-single-window)
-  "ai_apps": [
-    {
-      "name": "claude",
-      "command": "claude --dangerously-skip-permissions",
-      "ultrathink": "ultrathink"
-    },
-    {
-      "name": "gemini",
-      "command": "gemini --yolo"
-    },
-    {
-      "name": "codex",
-      "command": "codex --yolo"
-    },
-    {
-      "name": "amp",
-      "command": "amp --dangerously-allow-all"
-    },
-    {
-      "name": "opencode",
-      "command": "opencode"
-    },
-    {
-      "name": "cursor-agent",
-      "command": "cursor-agent --force"
-    }
-  ]
+  "hooks": {
+    "postAdd": ["npm install"]  // Commands to run in each new worktree after creation
+  }
 }
 ```
 
-### Configuration Fields
+AI tools are configured globally in `apps.jsonc` (see [Global Configuration](#global-configuration) below). You can override them per-project by adding an `ai_apps` array to the project config.
 
-- `terminals_per_column` (optional): Number of terminal panes per column (default: 2). The first pane runs the AI command, additional panes are shell terminals
-- `mode` (optional): One of `"iterm2"`, `"tmux-single-window"`, `"tmux-multi-window"`. Defaults by OS: macOS → `iterm2`; others → `tmux-single-window`. Use CLI `--mode` (or legacy `--tmux`) to override per run.
+### Project Configuration Fields
+
 - `project_path` (required): Absolute path to the main git repository. Auto-detected by `mai init`.
-- `worktrees_path` (optional): The worktrees root path, used for config matching when running inside a worktree.
-- `ai_apps`: Array of AI applications to configure
-  - `name`: The name of the AI tool (used for branch naming)
-  - `command`: The full command to launch the AI tool with any flags
-  - `ultrathink` (optional): Extra prompt text appended when using `mai send` with Ultrathink enabled (prompt pane only)
+- `worktrees_path` (optional): The worktrees root path, used for config matching when running inside a worktree. Defaults to project directory.
+- `terminals_per_column` (optional): Number of terminal panes per column (default: 2). The first pane runs the AI command, additional panes are shell terminals.
+- `mode` (optional): One of `"iterm2"`, `"tmux-single-window"`, `"tmux-multi-window"`. Defaults by OS: macOS → `iterm2`; others → `tmux-single-window`. Use CLI `--mode` (or legacy `--tmux`) to override per run.
+- `ai_apps` (optional): Array of AI applications. If omitted, tools from global `apps.jsonc` are used via the interactive picker.
+- `hooks` (optional): Lifecycle hooks:
+  - `postAdd` (array of strings): Commands to run in each new worktree directory after creation (e.g., `"npm install"`, `"make setup"`)
+
+### Global Configuration
+
+Global config files live in `~/.config/multi-ai-cli/`:
+
+#### `apps.jsonc` — AI Tools
+
+Defines all available AI tools. Run `mai apps` to open this file. Each entry has:
+
+```jsonc
+{
+  "name": "claude",                                    // Tool name
+  "slug": "claude-plan-yolo",                          // Git-safe slug for branch names (auto-generated if omitted)
+  "command": "claude --permission-mode plan ...",       // Full command to launch
+  "description": "Plan mode with skip option",         // Shown in interactive pickers
+  "default": true,                                     // Pre-selected in interactive pickers
+  "meta_review": false,                                // Eligible for meta-reviewer/meta-planner role
+  "ultrathink": "ultrathink"                           // Extra text appended when Ultrathink is enabled in mai send
+}
+```
+
+#### `settings.jsonc` — Prompts and Templates
+
+Contains review and plan prompt templates. Run `mai apps` or edit directly. Supports template variables:
+
+- `{{base_branch}}` — substituted with the selected base branch name
+- `{{review_locations}}` — replaced with paths to individual `REVIEW.md` files
+- `{{plan_locations}}` — replaced with paths to individual `PLAN.md` files
 
 ## Usage
 
-**Important**: `mai add`, `mai continue`, `mai resume`, `mai remove`, `mai send`, and `mai plan` should be run from within your project (or a worktree). Config is discovered from `~/.config/multi-ai-cli/` using the git remote URL.
+**Important**: Most commands should be run from within your project (or a worktree). Config is discovered from `~/.config/multi-ai-cli/` using the git remote URL.
 
 ### Create worktrees and terminal sessions
 
 ```bash
-# From your project directory:
 cd ~/code/my-project
-mai add feature-branch   # Respects the mode defined in multi-ai-config.jsonc
-```
+mai add feature-branch   # Respects the mode defined in config
 
-Need a different layout for a single run? Use the new `--mode` flag (or `--tmux` as a shorthand for `tmux-multi-window`):
+# Interactive mode — pick environment name and AI tools:
+mai add
 
-```bash
+# Override layout for a single run:
 mai add feature-branch --mode tmux-single-window
-# legacy alias:
+# Legacy alias:
 mai add feature-branch --tmux
 ```
 
 This will:
 
 1. Create git worktrees for each AI app (e.g., `feature-branch-claude`, `feature-branch-gemini`)
-2. Create iTerm2 tabs (or tmux windows) for each AI application
-3. Each tab/window has two panes:
+2. Run any `postAdd` hooks in each new worktree
+3. Create iTerm2 tabs (or tmux windows) for each AI application
+4. Each tab/window has panes:
    - Top pane: Runs the AI tool with specified command
    - Bottom pane: Shell in the worktree directory for manual commands
 
@@ -157,8 +157,6 @@ This will:
 If you've closed your terminal session but the worktrees still exist, you can create a new session/tab:
 
 ```bash
-# From your project directory:
-cd ~/code/my-project
 mai continue feature-branch   # Creates new session/tab for existing worktrees
 # Or use the alias:
 mai resume feature-branch
@@ -172,12 +170,21 @@ This will:
 
 **Note**: If worktrees don't exist, you'll get an error asking you to run `mai add` first.
 
+### List worktree environments
+
+```bash
+mai list
+```
+
+Shows all worktree environments grouped by branch prefix, with relative timestamps and app slugs.
+
 ### Remove worktrees and cleanup
 
 ```bash
-# From your project directory:
-cd ~/code/my-project
 mai remove feature-branch
+
+# Interactive mode — pick one or more environments to remove:
+mai remove
 
 # Override cleanup behavior or skip confirmation:
 mai remove feature-branch --mode tmux-multi-window
@@ -189,8 +196,6 @@ mai remove feature-branch --force   # removes without prompting
 The `mai send` command opens an interactive TUI that allows you to send prompts or commands to running AI sessions:
 
 ```bash
-# From your project directory:
-cd ~/code/my-project
 mai send
 ```
 
@@ -234,6 +239,30 @@ Most terminal emulators don't transmit the Shift modifier with Enter by default.
 - Configure **Option+Enter** or **Ctrl+J** as alternatives
 - Use external editors and copy-paste for longer inputs
 
+### Multi-AI code review
+
+The `mai review` command launches an interactive TUI for code review across multiple AI tools:
+
+```bash
+cd ~/code/my-project
+mai review                        # Interactive branch selection
+mai review feat/my-branch         # Skip branch selection
+mai review input                  # Print last saved review prompt
+mai review meta                   # Print last saved meta reviewer prompt
+mai review copy-unified-path      # Copy unified review file path to clipboard
+```
+
+This will:
+
+1. Select a branch and base branch to review against
+2. Create review worktrees for each selected AI reviewer
+3. Generate a `CHANGES.diff` file in each worktree (merge-base diff)
+4. Send the review prompt to each AI tool
+5. Each reviewer writes findings to `REVIEW.md`
+6. If a meta reviewer is selected, it synthesizes all reviews into:
+   - `REVIEW_SUMMARY.md` — consolidated findings with per-tool attribution
+   - `REVIEW_SUMMARY_UNIFIED.md` — unified review without attribution
+
 ### Multi-AI collaborative planning
 
 The `mai plan` command launches an interactive TUI for collaborative planning across multiple AI tools:
@@ -247,6 +276,13 @@ mai plan meta           # Print last saved meta planner prompt
 ```
 
 Each selected AI planner creates an independent implementation plan (saved to `PLAN.md`), then the meta planner synthesizes all plans into a unified `PLAN_UNIFIED.md`. The planning prompt references [superpowers skills](https://github.com/anthropics/superpowers) for structured brainstorming and plan writing.
+
+### Open configuration files
+
+```bash
+mai config   # Open the project config file in default application
+mai apps     # Open the global AI tools config (apps.jsonc)
+```
 
 ## Terminal Layout
 
@@ -270,39 +306,30 @@ Each selected AI planner creates an independent implementation plan (saved to `P
 
 ## Example Workflow
 
-1. Initialize your project with gwt:
+1. Create the configuration file:
 
 ```bash
 cd ~/code/my-project
-gwt init
-```
-
-2. Create the configuration file:
-
-```bash
 mai init  # Interactive setup, saves to ~/.config/multi-ai-cli/
 ```
 
-3. Create AI development environments:
+2. Create AI development environments:
 
 ```bash
-cd ~/code/my-project
 mai add new-feature
 ```
 
-4. Work on your feature across multiple AI tools
+3. Work on your feature across multiple AI tools
 
-5. If you close your terminal but want to continue later:
+4. If you close your terminal but want to continue later:
 
 ```bash
-cd ~/code/my-project
 mai continue new-feature  # or: mai resume new-feature
 ```
 
-6. Clean up when done:
+5. Clean up when done:
 
 ```bash
-cd ~/code/my-project
 mai remove new-feature
 ```
 

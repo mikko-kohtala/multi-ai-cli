@@ -21,7 +21,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use iterm2::ITerm2Manager;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 use tmux::TmuxManager;
@@ -404,36 +404,27 @@ fn interactive_remove_command(
         }
     }
 
-    // Remove all worktrees in parallel (quiet mode to avoid interleaved output)
-    let worktree_manager = Arc::new(worktree_manager);
-    let (tx, rx) = mpsc::channel();
-
-    for branch_name in &unique_branches {
-        let wm = Arc::clone(&worktree_manager);
-        let bn = branch_name.clone();
-        let tx = tx.clone();
-        thread::spawn(move || {
-            let result = wm.remove_worktree_quiet(&bn);
-            tx.send((bn, result)).ok();
-        });
-    }
-    drop(tx);
-
+    // Remove all worktrees sequentially with progress
+    let total = unique_branches.len();
+    println!("Removing {} worktrees...", total);
     let mut failed = false;
-    for (branch_name, result) in rx {
-        match result {
-            Ok(_) => println!("  ✓ Removed worktree: {}", branch_name),
+    for (i, branch_name) in unique_branches.iter().enumerate() {
+        print!("  [{}/{}] {}...", i + 1, total, branch_name);
+        io::stdout().flush().ok();
+        match worktree_manager.remove_worktree_quiet(branch_name) {
+            Ok(_) => println!(" ✓"),
             Err(e) => {
-                eprintln!("  ✗ Failed to remove worktree {}: {}", branch_name, e);
+                println!(" ✗");
+                eprintln!("    {}", e);
                 failed = true;
             }
         }
     }
 
     if failed {
-        println!("\n⚠ Cleanup completed with errors.");
+        println!("⚠ Cleanup completed with errors.");
     } else {
-        println!("\n✓ Cleanup completed!");
+        println!("✓ Cleanup completed!");
     }
 
     Ok(())
@@ -874,16 +865,23 @@ fn remove_command(
     );
 
     // Remove worktrees
-    for branch_name in &branch_names {
-        println!("Removing worktree for branch '{}'...", branch_name);
-
+    let total = branch_names.len();
+    println!("Removing {} worktrees...", total);
+    let mut has_errors = false;
+    for (i, branch_name) in branch_names.iter().enumerate() {
         match worktree_manager.remove_worktree(branch_name) {
-            Ok(_) => println!("  ✓ Removed worktree: {}", branch_name),
-            Err(e) => eprintln!("  ✗ Failed to remove worktree: {}", e),
+            Ok(_) => println!("  ✓ [{}/{}] {}", i + 1, total, branch_name),
+            Err(e) => {
+                eprintln!("  ✗ [{}/{}] {}: {}", i + 1, total, branch_name, e);
+                has_errors = true;
+            }
         }
     }
-
-    println!("\n✓ Cleanup completed!");
+    if has_errors {
+        println!("⚠ Cleanup completed with errors.");
+    } else {
+        println!("✓ Cleanup completed!");
+    }
     Ok(())
 }
 
