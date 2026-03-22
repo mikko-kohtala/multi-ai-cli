@@ -17,10 +17,17 @@
   },
   {
     "name": "claude",
-    "slug": "claude-plan-yolo",
-    "command": "claude --permission-mode plan --allow-dangerously-skip-permissions",
-    "default": true,
+    "slug": "claude-haiku-yolo",
+    "command": "claude --dangerously-skip-permissions --model claude-haiku-4-5 --effort high",
     "meta_review": true,
+    "description": "Skip all permissions - no safety checks",
+  },
+  {
+    "name": "claude",
+    "slug": "claude-plan-yolo",
+    "command": "claude --permission-mode plan --allow-dangerously-skip-permissions --model claude-opus-4-6 --effort high",
+    "default": true,
+    "meta_review": false,
     "description": "Plan mode with skip option - review first, skip if needed",
   },
   {
