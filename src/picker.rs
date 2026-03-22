@@ -36,6 +36,7 @@ struct PickerState {
     apps: Vec<AiApp>,
     selected: Vec<bool>,
     focused: usize,
+    list_state: ListState,
     cancelled: bool,
     confirmed: bool,
 }
@@ -55,6 +56,7 @@ pub fn run_app_picker(prefill_env_name: Option<&str>) -> Result<Option<PickerRes
         apps,
         selected,
         focused: 0,
+        list_state: ListState::default().with_selected(Some(0)),
         cancelled: false,
         confirmed: false,
     };
@@ -66,7 +68,7 @@ pub fn run_app_picker(prefill_env_name: Option<&str>) -> Result<Option<PickerRes
     let mut terminal = Terminal::new(backend)?;
 
     while !state.cancelled && !state.confirmed {
-        terminal.draw(|f| render(f, &state))?;
+        terminal.draw(|f| render(f, &mut state))?;
         handle_input(&mut state)?;
     }
 
@@ -165,10 +167,12 @@ fn handle_input(state: &mut PickerState) -> Result<()> {
         },
     }
 
+    state.list_state.select(Some(state.focused));
+
     Ok(())
 }
 
-fn render(f: &mut Frame, state: &PickerState) {
+fn render(f: &mut Frame, state: &mut PickerState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -251,8 +255,7 @@ fn render(f: &mut Frame, state: &PickerState) {
         )
         .highlight_style(highlight);
 
-    let mut list_state = ListState::default().with_selected(Some(state.focused));
-    f.render_stateful_widget(list, chunks[2], &mut list_state);
+    f.render_stateful_widget(list, chunks[2], &mut state.list_state);
 
     // Footer
     let hints = match state.focus {
@@ -272,23 +275,23 @@ fn render(f: &mut Frame, state: &PickerState) {
 // --- Prefix picker for interactive remove ---
 
 struct PrefixPickerState {
-    /// (prefix, worktree_dir_names)
-    groups: Vec<(String, Vec<String>)>,
+    worktrees: Vec<String>,
     selected: Vec<bool>,
     focused: usize,
+    list_state: ListState,
     cancelled: bool,
     confirmed: bool,
 }
 
-/// Shows an interactive multi-select list of worktree prefix groups.
-/// Each entry shows the prefix and its worktree directories.
-/// Returns the selected prefix names.
-pub fn run_prefix_picker(groups: Vec<(String, Vec<String>)>) -> Result<Option<Vec<String>>> {
-    let count = groups.len();
+/// Shows an interactive multi-select list of individual worktrees.
+/// Returns the selected worktree names.
+pub fn run_prefix_picker(worktrees: Vec<String>) -> Result<Option<Vec<String>>> {
+    let count = worktrees.len();
     let mut state = PrefixPickerState {
-        groups,
+        worktrees,
         selected: vec![false; count],
         focused: 0,
+        list_state: ListState::default().with_selected(Some(0)),
         cancelled: false,
         confirmed: false,
     };
@@ -300,7 +303,7 @@ pub fn run_prefix_picker(groups: Vec<(String, Vec<String>)>) -> Result<Option<Ve
     let mut terminal = Terminal::new(backend)?;
 
     while !state.cancelled && !state.confirmed {
-        terminal.draw(|f| render_prefix_picker(f, &state))?;
+        terminal.draw(|f| render_prefix_picker(f, &mut state))?;
         handle_prefix_input(&mut state)?;
     }
 
@@ -312,12 +315,12 @@ pub fn run_prefix_picker(groups: Vec<(String, Vec<String>)>) -> Result<Option<Ve
     }
 
     let selected: Vec<String> = state
-        .groups
+        .worktrees
         .iter()
         .enumerate()
-        .filter_map(|(i, (prefix, _))| {
+        .filter_map(|(i, name)| {
             if state.selected[i] {
-                Some(prefix.clone())
+                Some(name.clone())
             } else {
                 None
             }
@@ -344,7 +347,7 @@ fn handle_prefix_input(state: &mut PrefixPickerState) -> Result<()> {
         KeyCode::Esc | KeyCode::Char('q') => state.cancelled = true,
         KeyCode::Up => state.focused = state.focused.saturating_sub(1),
         KeyCode::Down => {
-            if state.focused < state.groups.len().saturating_sub(1) {
+            if state.focused < state.worktrees.len().saturating_sub(1) {
                 state.focused += 1;
             }
         }
@@ -367,10 +370,12 @@ fn handle_prefix_input(state: &mut PrefixPickerState) -> Result<()> {
         _ => {}
     }
 
+    state.list_state.select(Some(state.focused));
+
     Ok(())
 }
 
-fn render_prefix_picker(f: &mut Frame, state: &PrefixPickerState) {
+fn render_prefix_picker(f: &mut Frame, state: &mut PrefixPickerState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -387,31 +392,13 @@ fn render_prefix_picker(f: &mut Frame, state: &PrefixPickerState) {
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(header, chunks[0]);
 
-    // List — each item shows prefix + worktree names
-    use ratatui::text::{Line, Span};
-
     let items: Vec<ListItem> = state
-        .groups
+        .worktrees
         .iter()
         .enumerate()
-        .map(|(i, (prefix, worktrees))| {
+        .map(|(i, name)| {
             let checkbox = if state.selected[i] { "[x]" } else { "[ ]" };
-            let header_line = Line::from(vec![
-                Span::raw(format!(" {} ", checkbox)),
-                Span::styled(
-                    prefix.clone(),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("  ({} worktrees)", worktrees.len()),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]);
-            let detail_line = Line::from(Span::styled(
-                format!("     {}", worktrees.join(", ")),
-                Style::default().fg(Color::DarkGray),
-            ));
-            ListItem::new(vec![header_line, detail_line])
+            ListItem::new(format!(" {} {}", checkbox, name))
         })
         .collect();
 
@@ -425,13 +412,12 @@ fn render_prefix_picker(f: &mut Frame, state: &PrefixPickerState) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
-                .title(" Select environments to remove ")
+                .title(" Select worktrees to remove ")
                 .title_bottom(" Space: toggle | a: all "),
         )
         .highlight_style(highlight);
 
-    let mut list_state = ListState::default().with_selected(Some(state.focused));
-    f.render_stateful_widget(list, chunks[1], &mut list_state);
+    f.render_stateful_widget(list, chunks[1], &mut state.list_state);
 
     // Scrollbar
     let scrollbar_area = chunks[1].inner(ratatui::layout::Margin {
@@ -439,7 +425,7 @@ fn render_prefix_picker(f: &mut Frame, state: &PrefixPickerState) {
         horizontal: 0,
     });
     let mut scrollbar_state =
-        ScrollbarState::new(state.groups.len().saturating_sub(1)).position(state.focused);
+        ScrollbarState::new(state.worktrees.len().saturating_sub(1)).position(state.focused);
     f.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight),
         scrollbar_area,

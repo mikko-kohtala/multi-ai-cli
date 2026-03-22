@@ -313,37 +313,28 @@ fn interactive_remove_command(
         .to_string();
     let worktree_manager = make_worktree_manager(&project_config, project_path);
 
-    let prefix_groups = discover_all_prefixes(&worktree_manager, &project_config);
+    let all_worktrees: Vec<String> = {
+        let wt_dir = worktree_manager.worktrees_path();
+        let mut entries = collect_worktree_entries(wt_dir);
+        entries.retain(|name| name != "main");
+        entries.sort();
+        entries
+    };
 
-    if prefix_groups.is_empty() {
-        println!("No worktree prefixes found.");
+    if all_worktrees.is_empty() {
+        println!("No worktrees found.");
         return Ok(());
     }
 
-    let selected = picker::run_prefix_picker(prefix_groups)?;
+    let selected = picker::run_prefix_picker(all_worktrees)?;
     let Some(selected) = selected else {
         println!("Cancelled.");
         return Ok(());
     };
 
     if selected.is_empty() {
-        println!("No prefixes selected.");
+        println!("No worktrees selected.");
         return Ok(());
-    }
-
-    // Gather all worktree branch names for a single combined confirmation
-    let mut all_branches: Vec<(String, Vec<String>)> = Vec::new();
-    for prefix in &selected {
-        let branches: Vec<String> = if !project_config.ai_apps.is_empty() {
-            project_config
-                .ai_apps
-                .iter()
-                .map(|app| format!("{}-{}", prefix, app.slug()))
-                .collect()
-        } else {
-            discover_worktree_branches(&worktree_manager, prefix)
-        };
-        all_branches.push((prefix.clone(), branches));
     }
 
     // Determine mode for display
@@ -355,20 +346,31 @@ fn interactive_remove_command(
         mode = project_config.mode.clone();
     }
 
-    // Show combined confirmation
+    // Derive prefixes from selected worktrees for tmux session cleanup
+    let prefixes: Vec<String> = {
+        let prefix_groups = discover_all_prefixes(&worktree_manager, &project_config);
+        let mut prefixes = std::collections::BTreeSet::new();
+        for (prefix, worktrees) in &prefix_groups {
+            if worktrees.iter().any(|wt| selected.contains(wt)) {
+                prefixes.insert(prefix.clone());
+            }
+        }
+        prefixes.into_iter().collect()
+    };
+
+    // Show confirmation
     if !force {
         println!("⚠️  You are about to remove:");
-        for (prefix, branches) in &all_branches {
-            println!("  [{}]", prefix);
-            for branch in branches {
-                println!("    • {}", branch);
-            }
-            match mode {
-                Some(Mode::TmuxMultiWindow) | Some(Mode::TmuxSingleWindow) => {
-                    println!("    ⊘ tmux session: {}-{}", project_name, prefix);
+        for branch in &selected {
+            println!("  • {}", branch);
+        }
+        match mode {
+            Some(Mode::TmuxMultiWindow) | Some(Mode::TmuxSingleWindow) => {
+                for prefix in &prefixes {
+                    println!("  ⊘ tmux session: {}-{}", project_name, prefix);
                 }
-                _ => {}
             }
+            _ => {}
         }
         println!();
         if !ask_confirmation("Are you sure you want to remove these worktrees and sessions?")? {
@@ -378,14 +380,14 @@ fn interactive_remove_command(
     }
 
     // Kill tmux sessions first (fast, sequential)
-    for prefix in &selected {
+    for prefix in &prefixes {
         let tmux_manager = TmuxManager::new(&project_name, prefix);
         match tmux_manager.kill_session() {
             Ok(true) => println!(
                 "  ✓ Tmux session '{}-{}' removed",
                 project_name, prefix
             ),
-            Ok(false) => {} // session didn't exist, nothing to report
+            Ok(false) => {}
             Err(e) => eprintln!(
                 "  ⚠ Tmux session '{}-{}' cleanup: {}",
                 project_name, prefix, e
@@ -393,22 +395,11 @@ fn interactive_remove_command(
         }
     }
 
-    // Collect unique branch names across all prefix groups to avoid duplicate removals
-    let mut seen = std::collections::HashSet::new();
-    let mut unique_branches: Vec<String> = Vec::new();
-    for (_prefix, branches) in &all_branches {
-        for branch in branches {
-            if seen.insert(branch.clone()) {
-                unique_branches.push(branch.clone());
-            }
-        }
-    }
-
-    // Remove all worktrees sequentially with progress
-    let total = unique_branches.len();
+    // Remove selected worktrees sequentially with progress
+    let total = selected.len();
     println!("Removing {} worktrees...", total);
     let mut failed = false;
-    for (i, branch_name) in unique_branches.iter().enumerate() {
+    for (i, branch_name) in selected.iter().enumerate() {
         print!("  [{}/{}] {}...", i + 1, total, branch_name);
         io::stdout().flush().ok();
         match worktree_manager.remove_worktree_quiet(branch_name) {
