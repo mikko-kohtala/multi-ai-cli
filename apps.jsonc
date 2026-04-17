@@ -17,15 +17,22 @@
   },
   {
     "name": "claude",
-    "slug": "claude-haiku-yolo",
-    "command": "claude --dangerously-skip-permissions --model claude-haiku-4-5 --effort high",
+    "slug": "claude-sonnet-yolo",
+    "command": "claude --dangerously-skip-permissions --model sonnet --effort high",
     "meta_review": true,
     "description": "Skip all permissions - no safety checks",
   },
   {
     "name": "claude",
+    "slug": "claude-haiku-yolo",
+    "command": "claude --dangerously-skip-permissions --model haiku --effort high",
+    "meta_review": false,
+    "description": "Skip all permissions - no safety checks",
+  },
+  {
+    "name": "claude",
     "slug": "claude-plan-yolo",
-    "command": "claude --permission-mode plan --allow-dangerously-skip-permissions --model claude-opus-4-6 --effort high",
+    "command": "claude --permission-mode plan --allow-dangerously-skip-permissions --model opus --effort high",
     "default": true,
     "meta_review": false,
     "description": "Plan mode with skip option - review first, skip if needed",
@@ -100,6 +107,21 @@
     "command": "opencode",
     "default": false,
     "description": "Standard mode - interactive approval workflow",
+  },
+  // opencode with github-copilot/claude-opus-4.6
+  {
+    "name": "opencode",
+    "slug": "opencode-opus",
+    "command": "opencode --model github-copilot/claude-opus-4.6",
+    "default": true,
+    "description": "Opencode with Claude Opus 4.6 - enhanced reasoning and code generation",
+  },
+  {
+    "name": "opencode",
+    "slug": "opencode-gpt-5.4",
+    "command": "opencode --model openai/gpt-5.4",
+    "default": true,
+    "description": "Opencode with GPT-5.4 - enhanced reasoning and code generation",
   },
   {
     "name": "cursor-agent",

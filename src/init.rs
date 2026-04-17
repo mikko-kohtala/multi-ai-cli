@@ -48,7 +48,10 @@ enum AppState {
 
 impl WizardState {
     fn new(project_path: PathBuf) -> Result<Self> {
-        let worktrees_path = None;
+        let worktrees_path = project_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| project_path.with_file_name(format!("{}-worktrees", n)));
 
         Ok(Self {
             current_step: WizardStep::SelectMode {
@@ -487,7 +490,11 @@ fn save_config(wizard: &WizardState) -> Result<()> {
   // AI tools are configured globally — run 'mai apps' to edit
   "project_path": "{}",{}
   "terminals_per_column": {},  // Number of terminal panes per column (first is AI command, rest are shells)
-  "mode": "{}"                 // iterm2 | tmux-single-window | tmux-multi-window
+  "mode": "{}",                // iterm2 | tmux-single-window | tmux-multi-window
+  "hooks": {{
+    "postAdd": [],
+    "preRemove": []
+  }}
 }}"#,
         wizard.project_path.display(),
         worktrees_line,
