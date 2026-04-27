@@ -63,10 +63,17 @@
   },
   {
     "name": "codex",
-    "slug": "codex-yolo-gpt-5.4-xhigh",
-    "command": "codex --yolo --model gpt-5.4 --config model_reasoning_effort='xhigh'",
+    "slug": "codex-yolo-gpt-5.5-xhigh",
+    "command": "codex --yolo --model gpt-5.5 --config model_reasoning_effort='xhigh'",
     "default": false,
-    "description": "YOLO + gpt-5.4 model - high reasoning with auto-approval",
+    "description": "YOLO + gpt-5.5 model - high reasoning with auto-approval",
+  },
+  {
+    "name": "codex",
+    "slug": "codex-yolo-gpt-5.5-medium",
+    "command": "codex --yolo --model gpt-5.5 --config model_reasoning_effort='medium'",
+    "default": false,
+    "description": "YOLO + gpt-5.5 model - medium reasoning with auto-approval",
   },
   {
     "name": "codex",
