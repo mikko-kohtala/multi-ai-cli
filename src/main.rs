@@ -13,7 +13,7 @@ mod send;
 mod tmux;
 mod worktree;
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use config::{Mode, ProjectConfig, TmuxLayout};
 use error::{MultiAiError, Result};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -137,11 +137,17 @@ enum Command {
     #[command(about = "Send text to a running session via TUI")]
     Send,
 
-    #[command(about = "Launch interactive multi-AI code review")]
+    #[command(
+        about = "Launch interactive multi-AI code review",
+        args_conflicts_with_subcommands = true
+    )]
     Review {
         /// Branch to review (skips branch selection if exact match found)
         #[arg(index = 1)]
         branch: Option<String>,
+
+        #[command(subcommand)]
+        sub: Option<ReviewSubcommand>,
     },
 
     #[command(about = "Launch interactive multi-AI collaborative planning")]
@@ -159,6 +165,19 @@ enum Command {
 
     #[command(about = "Open the global AI tools configuration file")]
     Apps,
+}
+
+#[derive(Subcommand, Debug)]
+enum ReviewSubcommand {
+    #[command(about = "Print the last saved review prompt")]
+    Input,
+    #[command(about = "Print the last saved meta reviewer prompt")]
+    Meta,
+    #[command(
+        name = "copy-unified-path",
+        about = "Copy the unified review path to the clipboard"
+    )]
+    CopyUnifiedPath,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -219,7 +238,12 @@ fn main() -> Result<()> {
             mode,
         }) => continue_command(branch_prefix, tmux, mode),
         Some(Command::Send) => send_command(),
-        Some(Command::Review { branch }) => review_command(branch),
+        Some(Command::Review { branch, sub }) => match sub {
+            Some(ReviewSubcommand::Input) => review_input_command(),
+            Some(ReviewSubcommand::Meta) => review_meta_command(),
+            Some(ReviewSubcommand::CopyUnifiedPath) => review_copy_unified_path_command(),
+            None => review_command(branch),
+        },
         Some(Command::Plan { branch }) => plan_command(branch),
         Some(Command::List) => list_command(),
         Some(Command::Config) => config_command(),
@@ -1058,14 +1082,6 @@ fn send_command() -> Result<()> {
 }
 
 fn review_command(branch: Option<String>) -> Result<()> {
-    // Handle `mai review input` and `mai review meta` subcommands
-    match branch.as_deref() {
-        Some("input") => return review_input_command(),
-        Some("meta") => return review_meta_command(),
-        Some("copy-unified-path") => return review_copy_unified_path_command(),
-        _ => {}
-    }
-
     let current_dir = std::env::current_dir()
         .map_err(|e| MultiAiError::Config(format!("Failed to get current directory: {}", e)))?;
 
