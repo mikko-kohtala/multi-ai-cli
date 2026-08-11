@@ -88,7 +88,9 @@ fn parse_created_id(output: &str) -> Result<String> {
         .next()
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
-        .ok_or_else(|| MultiAiError::ITerm2(format!("Could not parse ID from it2 output: {output}")))
+        .ok_or_else(|| {
+            MultiAiError::ITerm2(format!("Could not parse ID from it2 output: {output}"))
+        })
 }
 
 /// Find the session ID belonging to a given tab by querying `it2 session list --json`.
@@ -138,10 +140,7 @@ pub fn create_iterm2_layout(spec: &LayoutSpec) -> Result<()> {
     ai_panes.push(first_session);
 
     for i in 1..spec.columns.len() {
-        let new_pane = run_it2(
-            &it2,
-            &["session", "split", "-v", "-s", &ai_panes[i - 1]],
-        )?;
+        let new_pane = run_it2(&it2, &["session", "split", "-v", "-s", &ai_panes[i - 1]])?;
         ai_panes.push(parse_created_id(&new_pane)?);
     }
 
@@ -184,10 +183,7 @@ pub fn create_iterm2_layout(spec: &LayoutSpec) -> Result<()> {
                     if let Some(ref meta) = spec.meta_prompt {
                         thread::sleep(Duration::from_secs(1));
                         // Send without newline so the user can review before pressing Enter.
-                        run_it2(
-                            &it2,
-                            &["session", "send", "-s", &ai_panes[i], meta],
-                        )?;
+                        run_it2(&it2, &["session", "send", "-s", &ai_panes[i], meta])?;
                     }
                 }
             }

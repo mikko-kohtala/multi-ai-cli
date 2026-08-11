@@ -272,11 +272,7 @@ fn plan_data_path(config_path: &Path) -> PathBuf {
     config_path.with_file_name(format!("{}-plan.json", stem))
 }
 
-fn save_plan_data(
-    config_path: &Path,
-    plan_prompt: &str,
-    meta_prompt: Option<&str>,
-) -> Result<()> {
+fn save_plan_data(config_path: &Path, plan_prompt: &str, meta_prompt: Option<&str>) -> Result<()> {
     let data = PlanData {
         plan_prompt: plan_prompt.to_string(),
         meta_prompt: meta_prompt.map(|s| s.to_string()),
@@ -589,22 +585,16 @@ fn handle_branch_input(wizard: &mut PlanWizardState, key: KeyCode) {
                         branch.name.clone()
                     };
 
-                    let mut ai_selected: Vec<bool> = wizard
-                        .plan_services
-                        .iter()
-                        .map(|app| app.default)
-                        .collect();
+                    let mut ai_selected: Vec<bool> =
+                        wizard.plan_services.iter().map(|app| app.default).collect();
                     // If no defaults configured, select the first entry
                     if !ai_selected.iter().any(|&s| s) && !ai_selected.is_empty() {
                         ai_selected[0] = true;
                     }
 
                     // Pre-select entries marked with meta_review in apps.jsonc
-                    let meta_selected: Vec<bool> = wizard
-                        .plan_services
-                        .iter()
-                        .map(|a| a.meta_review)
-                        .collect();
+                    let meta_selected: Vec<bool> =
+                        wizard.plan_services.iter().map(|a| a.meta_review).collect();
 
                     let prompt = wizard.plan_prompt.clone();
                     let len = prompt.len();
@@ -1178,7 +1168,7 @@ fn render_configure(f: &mut Frame, area: Rect, wizard: &PlanWizardState) {
         .constraints([
             Constraint::Percentage(25), // Task description
             Constraint::Percentage(35), // Plan instructions
-            Constraint::Length(3),       // Send prompts toggle
+            Constraint::Length(3),      // Send prompts toggle
             Constraint::Min(5),         // AI Planners + Meta Planner side by side
         ])
         .split(area);
@@ -1208,8 +1198,7 @@ fn render_configure(f: &mut Frame, area: Rect, wizard: &PlanWizardState) {
     let task_inner_height = task_inner.height as usize;
 
     let task_visual_lines = wrap_text_chars(task_text, task_inner_width);
-    let (task_vis_row, task_vis_col) =
-        cursor_visual_pos(task_text, *task_cursor, task_inner_width);
+    let (task_vis_row, task_vis_col) = cursor_visual_pos(task_text, *task_cursor, task_inner_width);
     let task_scroll = if task_vis_row >= task_inner_height {
         task_vis_row - task_inner_height + 1
     } else {
@@ -1620,4 +1609,3 @@ fn create_plan_worktrees(
 
     Ok(paths)
 }
-

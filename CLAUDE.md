@@ -120,7 +120,12 @@ cargo fmt      # Format code according to Rust standards
    - Launch pane: original pane per app (left for multi_window, top for single_window) runs the AI tool (500ms delay before sending)
    - Pane targeting uses `#{pane_id}` captured pre-split to avoid index assumptions
 
-6. **error.rs**: Custom error types using thiserror for structured error handling
+6. **pr.rs**: Best-effort open-PR discovery via the GitHub CLI (`gh pr list`):
+   - Used by `mai review` to pre-fill the editable Context Links field with the source branch's PR URL and linked issue/ticket URLs (GitHub closing issues plus Jira/Linear/GitHub issue links scraped from the PR body)
+   - The links are injected into the review and meta prompts as a "Related context" block (or at the optional `{{context}}` placeholder) so AI reviewers read the PR description and ticket before reviewing
+   - Fails silently (empty list) if `gh` is missing, unauthenticated, or the repo is not on GitHub
+
+7. **error.rs**: Custom error types using thiserror for structured error handling
 
 ### Key Implementation Details
 

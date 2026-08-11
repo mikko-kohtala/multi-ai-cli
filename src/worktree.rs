@@ -139,9 +139,7 @@ impl WorktreeManager {
             MultiAiError::CommandFailed(format!("Failed to execute git worktree remove: {}", e))
         })?;
 
-        if verbose
-            && let Some(stdout) = child.stdout.take()
-        {
+        if verbose && let Some(stdout) = child.stdout.take() {
             let reader = BufReader::new(stdout);
             for line in reader.lines().map_while(|r| r.ok()) {
                 println!("    {}", line);
@@ -214,7 +212,11 @@ impl WorktreeManager {
 
     fn branch_exists_locally(&self, branch_name: &str) -> bool {
         Command::new("git")
-            .args(["rev-parse", "--verify", &format!("refs/heads/{}", branch_name)])
+            .args([
+                "rev-parse",
+                "--verify",
+                &format!("refs/heads/{}", branch_name),
+            ])
             .current_dir(&self.project_path)
             .stdout(Stdio::null())
             .stderr(Stdio::null())

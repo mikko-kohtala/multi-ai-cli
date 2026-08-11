@@ -123,6 +123,7 @@ Contains review and plan prompt templates. Run `mai apps` or edit directly. Supp
 - `{{base_branch}}` — substituted with the selected base branch name
 - `{{review_locations}}` — replaced with paths to individual `REVIEW.md` files
 - `{{plan_locations}}` — replaced with paths to individual `PLAN.md` files
+- `{{context}}` — (optional, review prompts) replaced with the PR/issue context block; if absent, the block is appended to the end of the prompt
 
 ## Usage
 
@@ -255,13 +256,16 @@ mai review copy-unified-path      # Copy unified review file path to clipboard
 This will:
 
 1. Select a branch and base branch to review against
-2. Create review worktrees for each selected AI reviewer
-3. Generate a `CHANGES.diff` file in each worktree (merge-base diff)
-4. Send the review prompt to each AI tool
-5. Each reviewer writes findings to `REVIEW.md`
-6. If a meta reviewer is selected, it synthesizes all reviews into:
+2. Detect the branch's open PR via `gh` (best-effort) and pre-fill an editable **Context Links** field with the PR URL and any linked issues/tickets (GitHub issues, Jira, Linear) — paste additional URLs as needed
+3. Create review worktrees for each selected AI reviewer
+4. Generate a `CHANGES.diff` file in each worktree (merge-base diff)
+5. Send the review prompt to each AI tool, including a "Related context" block with the PR/issue links so reviewers read the PR description and ticket to understand intent
+6. Each reviewer writes findings to `REVIEW.md`
+7. If a meta reviewer is selected, it synthesizes all reviews into:
    - `REVIEW_SUMMARY.md` — consolidated findings with per-tool attribution
    - `REVIEW_SUMMARY_UNIFIED.md` — unified review without attribution
+
+PR detection requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated; without it the Context Links field starts empty and links can be pasted manually.
 
 ### Multi-AI collaborative planning
 

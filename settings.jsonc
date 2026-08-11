@@ -2,7 +2,10 @@
 // Edit review and plan prompts and other global settings here
 {
   // Prompt sent to each AI reviewer tool
-  "review_prompt": "Review changes in this branch against {{base_branch}}.\n\nTo see only the PR changes (excluding unrelated commits on {{base_branch}}), use:\n  git diff $(git merge-base origin/{{base_branch}} HEAD)..HEAD\n\nA pre-computed diff of these changes is available in CHANGES.diff.\n\nOnce done with the review, write findings to REVIEW.md\n\nMarkdown formatting: write each paragraph as a single line. Do not hard-wrap lines at a fixed column width (e.g. 80 characters).",
+  // Optional {{context}} placeholder positions the PR/issue context block
+  // (detected from open PRs via `gh`, editable in the review TUI).
+  // Without the placeholder, the context block is appended to the end.
+  "review_prompt":"Review changes in this branch against {{base_branch}}.\n\nTo see only the PR changes (excluding unrelated commits on {{base_branch}}), use:\n  git diff $(git merge-base origin/{{base_branch}} HEAD)..HEAD\n\nA pre-computed diff of these changes is available in CHANGES.diff.\n\nOnce done with the review, write findings to REVIEW.md\n\nMarkdown formatting: write each paragraph as a single line. Do not hard-wrap lines at a fixed column width (e.g. 80 characters).",
 
   // Template for the meta reviewer prompt
   // {{review_locations}} is replaced with the list of REVIEW.md file paths at runtime

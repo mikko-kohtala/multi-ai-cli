@@ -52,6 +52,7 @@ struct SelectedTool {
 #[derive(Clone, Copy, PartialEq)]
 enum ConfigSection {
     Prompt,
+    ContextLinks,
     SendPrompts,
     AiReviewers,
     MetaReviewer,
@@ -60,7 +61,8 @@ enum ConfigSection {
 impl ConfigSection {
     fn next(self) -> Self {
         match self {
-            Self::Prompt => Self::SendPrompts,
+            Self::Prompt => Self::ContextLinks,
+            Self::ContextLinks => Self::SendPrompts,
             Self::SendPrompts => Self::AiReviewers,
             Self::AiReviewers => Self::MetaReviewer,
             Self::MetaReviewer => Self::Prompt,
@@ -70,10 +72,16 @@ impl ConfigSection {
     fn prev(self) -> Self {
         match self {
             Self::Prompt => Self::MetaReviewer,
-            Self::SendPrompts => Self::Prompt,
+            Self::ContextLinks => Self::Prompt,
+            Self::SendPrompts => Self::ContextLinks,
             Self::AiReviewers => Self::SendPrompts,
             Self::MetaReviewer => Self::AiReviewers,
         }
+    }
+
+    /// Sections that behave as multiline text editors.
+    fn is_text_editor(self) -> bool {
+        matches!(self, Self::Prompt | Self::ContextLinks)
     }
 }
 
@@ -94,6 +102,9 @@ enum ReviewStep {
         // Prompt
         prompt_text: String,
         prompt_cursor: usize,
+        // Context links (PR / issue URLs, editable)
+        links_text: String,
+        links_cursor: usize,
         // Send prompts toggle
         send_prompts: bool,
         // AI reviewers (multi-select checkboxes)
@@ -124,6 +135,8 @@ struct ReviewWizardState {
     project_path: PathBuf,
     // Branch list (shared across selection steps)
     all_branches: Vec<BranchInfo>,
+    // Open PRs discovered via `gh` (best-effort), used to pre-fill context links
+    open_prs: Vec<crate::pr::PrInfo>,
 
     // Populated when user confirms
     source_branch: String,
@@ -132,6 +145,11 @@ struct ReviewWizardState {
     base_branch: String,
     base_branch_ref: String,
     review_prompt: String,
+    /// PR / issue links providing context for the review (editable in the TUI).
+    context_links: String,
+    /// Source branch the saved `context_links` were derived for; used to
+    /// re-detect defaults when the user picks a different branch.
+    context_links_branch: String,
     send_prompts: bool,
     selected_tools: Vec<SelectedTool>,
 }
@@ -142,6 +160,7 @@ impl ReviewWizardState {
         branch: Option<&str>,
         settings: &crate::config::Settings,
         project_path: &Path,
+        open_prs: Vec<crate::pr::PrInfo>,
     ) -> Self {
         let review_services = init::load_apps().unwrap_or_default();
         let default_prompt = settings.review_prompt.clone();
@@ -174,11 +193,14 @@ impl ReviewWizardState {
                 review_services,
                 project_path: project_path.to_path_buf(),
                 all_branches: branches,
+                open_prs,
                 source_branch,
                 source_branch_ref,
                 base_branch: String::new(),
                 base_branch_ref: String::new(),
                 review_prompt: default_prompt,
+                context_links: String::new(),
+                context_links_branch: String::new(),
                 send_prompts: true,
                 selected_tools: Vec::new(),
             };
@@ -195,11 +217,14 @@ impl ReviewWizardState {
             review_services,
             project_path: project_path.to_path_buf(),
             all_branches: branches,
+            open_prs,
             source_branch: String::new(),
             source_branch_ref: String::new(),
             base_branch: String::new(),
             base_branch_ref: String::new(),
             review_prompt: default_prompt,
+            context_links: String::new(),
+            context_links_branch: String::new(),
             send_prompts: true,
             selected_tools: Vec::new(),
         }
@@ -243,6 +268,49 @@ fn filtered_branches<'a>(branches: &'a [BranchInfo], filter: &str) -> Vec<(usize
             .enumerate()
             .filter(|(_, b)| b.name.to_lowercase().contains(&lower))
             .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Review context (PR / issue links)
+// ---------------------------------------------------------------------------
+
+/// Optional placeholder in prompt templates for the review context block.
+/// When absent, the block is appended to the end of the prompt instead.
+const CONTEXT_PLACEHOLDER: &str = "{{context}}";
+
+/// Build the default context-links text for a branch from discovered open PRs.
+fn default_context_links(open_prs: &[crate::pr::PrInfo], branch: &str) -> String {
+    let Some(pr) = crate::pr::find_pr_for_branch(open_prs, branch) else {
+        return String::new();
+    };
+    let mut lines = vec![format!("PR: {} — {}", pr.url, pr.title)];
+    for url in &pr.issue_urls {
+        lines.push(format!("Issue: {}", url));
+    }
+    lines.join("\n")
+}
+
+/// Inject the context links into a prompt template.
+/// If the template contains `{{context}}`, it is replaced with the context
+/// block (or removed when there are no links). Otherwise the block is appended.
+fn apply_context(template: &str, links: &str) -> String {
+    let links = links.trim();
+    let block = if links.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "## Related context\n\n{}\n\nBefore reviewing, read the PR description and any linked issue/ticket above (e.g. `gh pr view <url>`, `gh issue view <url>`, or fetch the URL) to understand the intent behind these changes.",
+            links
+        )
+    };
+
+    if template.contains(CONTEXT_PLACEHOLDER) {
+        template.replace(CONTEXT_PLACEHOLDER, &block)
+    } else if block.is_empty() {
+        template.to_string()
+    } else {
+        format!("{}\n\n{}", template.trim_end(), block)
     }
 }
 
@@ -340,9 +408,21 @@ pub fn run_review(
     let branches = git::list_all_branches(&project_path);
     println!(" {} branches found.", branches.len());
 
+    // Discover open PRs (best-effort, via `gh`) to pre-fill review context links
+    print!("Checking for open PRs...");
+    io::stdout().flush().ok();
+    let open_prs = crate::pr::list_open_prs(&project_path);
+    println!(" {} found.", open_prs.len());
+
     // 3. Run TUI wizard
     let (mut terminal, keyboard_enhancement_enabled) = setup_terminal()?;
-    let mut wizard = ReviewWizardState::new(branches, branch.as_deref(), &settings, &project_path);
+    let mut wizard = ReviewWizardState::new(
+        branches,
+        branch.as_deref(),
+        &settings,
+        &project_path,
+        open_prs,
+    );
     let result = run_wizard(&mut terminal, &mut wizard, keyboard_enhancement_enabled);
     cleanup_terminal(&mut terminal, keyboard_enhancement_enabled)?;
 
@@ -381,9 +461,12 @@ pub fn run_review(
         .collect();
 
     // 6. Build review & meta prompts (before creating worktrees so user sees them early)
-    let review_prompt = wizard
-        .review_prompt
-        .replace("{{base_branch}}", &wizard.base_branch);
+    let review_prompt = apply_context(
+        &wizard
+            .review_prompt
+            .replace("{{base_branch}}", &wizard.base_branch),
+        &wizard.context_links,
+    );
 
     // Build review locations for meta prompt using predictable worktree paths
     let mut review_locations = Vec::new();
@@ -410,12 +493,13 @@ pub fn run_review(
     }
 
     let meta_prompt = if !review_locations.is_empty() {
-        Some(
-            settings
+        Some(apply_context(
+            &settings
                 .meta_prompt_template
                 .replace("{{review_locations}}", &review_locations.join("\n"))
                 .replace("{{base_branch}}", &wizard.base_branch),
-        )
+            &wizard.context_links,
+        ))
     } else {
         None
     };
@@ -716,10 +800,20 @@ fn handle_base_branch_input(wizard: &mut ReviewWizardState, key: KeyCode) {
 
                     let prompt = wizard.review_prompt.clone();
                     let len = prompt.len();
+                    // Reuse edited links if the source branch is unchanged,
+                    // otherwise pre-fill from the detected open PR (if any).
+                    let links = if wizard.context_links_branch == wizard.source_branch {
+                        wizard.context_links.clone()
+                    } else {
+                        default_context_links(&wizard.open_prs, &wizard.source_branch)
+                    };
+                    let links_len = links.len();
                     wizard.next(ReviewStep::Configure {
                         focus: ConfigSection::AiReviewers,
                         prompt_text: prompt,
                         prompt_cursor: len,
+                        links_text: links,
+                        links_cursor: links_len,
                         send_prompts: wizard.send_prompts,
                         ai_selected,
                         ai_focused: 0,
@@ -781,6 +875,8 @@ fn handle_configure_input(
         focus,
         prompt_text,
         prompt_cursor,
+        links_text,
+        links_cursor,
         send_prompts,
         ai_selected,
         ai_focused,
@@ -803,24 +899,29 @@ fn handle_configure_input(
 
     // Esc: back to branch selection
     if key == KeyCode::Esc {
-        // Save prompt and toggle state before going back
+        // Save prompt, links, and toggle state before going back
         wizard.review_prompt = prompt_text.clone();
+        wizard.context_links = links_text.clone();
+        wizard.context_links_branch = wizard.source_branch.clone();
         wizard.send_prompts = *send_prompts;
         wizard.back();
         return;
     }
 
-    // In prompt editor, Shift+Enter inserts a newline.
+    // In text editors, Shift+Enter inserts a newline.
     // Fallback: when terminal can't report Shift modifiers, plain Enter inserts newline.
-    if *focus == ConfigSection::Prompt
-        && is_prompt_newline_key(key, modifiers, keyboard_enhancement_enabled)
+    if focus.is_text_editor() && is_prompt_newline_key(key, modifiers, keyboard_enhancement_enabled)
     {
-        insert_prompt_newline(prompt_text, prompt_cursor);
+        match focus {
+            ConfigSection::Prompt => insert_prompt_newline(prompt_text, prompt_cursor),
+            ConfigSection::ContextLinks => insert_prompt_newline(links_text, links_cursor),
+            _ => {}
+        }
         return;
     }
 
-    // Enter: start review (from any section except Prompt)
-    if key == KeyCode::Enter && *focus != ConfigSection::Prompt {
+    // Enter: start review (from any non-text-editor section)
+    if key == KeyCode::Enter && !focus.is_text_editor() {
         let any_ai = ai_selected.iter().any(|&s| s);
         if !any_ai {
             return; // Must have at least one AI tool
@@ -828,6 +929,8 @@ fn handle_configure_input(
 
         // Populate wizard state for downstream functions
         wizard.review_prompt = prompt_text.clone();
+        wizard.context_links = links_text.clone();
+        wizard.context_links_branch = wizard.source_branch.clone();
         wizard.send_prompts = *send_prompts;
         wizard.selected_tools = Vec::new();
         for (i, &sel) in ai_selected.iter().enumerate() {
@@ -851,8 +954,8 @@ fn handle_configure_input(
         return;
     }
 
-    // q: quit (only when not in prompt)
-    if key == KeyCode::Char('q') && *focus != ConfigSection::Prompt {
+    // q: quit (only when not in a text editor)
+    if key == KeyCode::Char('q') && !focus.is_text_editor() {
         wizard.app_state = AppState::Cancelled;
         return;
     }
@@ -860,6 +963,9 @@ fn handle_configure_input(
     match focus {
         ConfigSection::Prompt => {
             handle_prompt_keys(prompt_text, prompt_cursor, key, modifiers);
+        }
+        ConfigSection::ContextLinks => {
+            handle_prompt_keys(links_text, links_cursor, key, modifiers);
         }
         ConfigSection::SendPrompts => {
             if key == KeyCode::Char(' ') {
@@ -1137,7 +1243,14 @@ fn render_content(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
             branches,
             focused,
             filter,
-        } => render_branch_select(f, area, branches, *focused, filter, "Select Branch to Review"),
+        } => render_branch_select(
+            f,
+            area,
+            branches,
+            *focused,
+            filter,
+            "Select Branch to Review",
+        ),
         ReviewStep::SelectBaseBranch {
             branches,
             focused,
@@ -1214,7 +1327,8 @@ fn render_branch_select(
 
     let title = format!(
         " {}{} [{} branches] ",
-        heading, filter_display,
+        heading,
+        filter_display,
         filtered.len()
     );
 
@@ -1249,11 +1363,72 @@ fn render_branch_select(
     );
 }
 
+/// Render a bordered multiline text editor with character-level wrapping and,
+/// when focused, a visible cursor scrolled into view.
+fn render_text_editor(
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    text: &str,
+    cursor: usize,
+    focused: bool,
+) {
+    let border = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border)
+        .title(title.to_string())
+        .title_bottom(" Shift+Enter: newline ");
+    let inner = block.inner(area);
+    let inner_width = inner.width as usize;
+    let inner_height = inner.height as usize;
+
+    // Build visual lines by wrapping at character boundaries.
+    // This must match the cursor position math exactly, so we avoid
+    // Paragraph's word-wrap and do character-level wrapping ourselves.
+    let visual_lines = wrap_text_chars(text, inner_width);
+
+    // Find the cursor's visual row and column.
+    let (cursor_vis_row, cursor_vis_col) = cursor_visual_pos(text, cursor, inner_width);
+
+    // Scroll so the cursor row is visible.
+    let scroll_offset = if cursor_vis_row >= inner_height {
+        cursor_vis_row - inner_height + 1
+    } else {
+        0
+    };
+
+    let wrapped_text = visual_lines.join("\n");
+    let paragraph = Paragraph::new(wrapped_text.as_str())
+        .block(block)
+        .scroll((scroll_offset as u16, 0));
+    f.render_widget(paragraph, area);
+
+    if focused {
+        let screen_row = cursor_vis_row.saturating_sub(scroll_offset) as u16;
+        let screen_col = cursor_vis_col as u16;
+
+        let final_row = inner.y + screen_row;
+        let final_col = inner.x + screen_col;
+
+        if final_row < inner.y + inner.height && final_col < inner.x + inner.width {
+            f.set_cursor_position((final_col, final_row));
+        }
+    }
+}
+
 fn render_configure(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
     let ReviewStep::Configure {
         focus,
         prompt_text,
         prompt_cursor,
+        links_text,
+        links_cursor,
         send_prompts,
         ai_selected,
         ai_focused,
@@ -1268,6 +1443,7 @@ fn render_configure(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(5), // Prompt
+            Constraint::Length(4), // Context links (PR / issue)
             Constraint::Length(3), // Send prompts toggle
             Constraint::Min(0),    // AI Reviewers + Meta Reviewer side by side
         ])
@@ -1279,58 +1455,32 @@ fn render_configure(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
             Constraint::Percentage(50), // AI Reviewers
             Constraint::Percentage(50), // Meta Reviewer
         ])
-        .split(rows[2]);
+        .split(rows[3]);
 
     // -- Prompt section --
-    let prompt_border = if *focus == ConfigSection::Prompt {
-        Style::default().fg(Color::Cyan)
+    render_text_editor(
+        f,
+        rows[0],
+        " Review Prompt ",
+        prompt_text,
+        *prompt_cursor,
+        *focus == ConfigSection::Prompt,
+    );
+
+    // -- Context links section --
+    let links_title = if links_text.is_empty() {
+        " Context Links (no open PR detected — paste PR/ticket URLs) "
     } else {
-        Style::default().fg(Color::DarkGray)
+        " Context Links (PR / Issue) "
     };
-
-    let prompt_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(prompt_border)
-        .title(" Review Prompt ")
-        .title_bottom(" Shift+Enter: newline ");
-    let inner = prompt_block.inner(rows[0]);
-    let inner_width = inner.width as usize;
-    let inner_height = inner.height as usize;
-
-    // Build visual lines by wrapping at character boundaries.
-    // This must match the cursor position math exactly, so we avoid
-    // Paragraph's word-wrap and do character-level wrapping ourselves.
-    let visual_lines = wrap_text_chars(prompt_text, inner_width);
-
-    // Find the cursor's visual row and column.
-    let (cursor_vis_row, cursor_vis_col) =
-        cursor_visual_pos(prompt_text, *prompt_cursor, inner_width);
-
-    // Scroll so the cursor row is visible.
-    let scroll_offset = if cursor_vis_row >= inner_height {
-        cursor_vis_row - inner_height + 1
-    } else {
-        0
-    };
-
-    let wrapped_text = visual_lines.join("\n");
-    let paragraph = Paragraph::new(wrapped_text.as_str())
-        .block(prompt_block)
-        .scroll((scroll_offset as u16, 0));
-    f.render_widget(paragraph, rows[0]);
-
-    // Show cursor when prompt is focused
-    if *focus == ConfigSection::Prompt {
-        let screen_row = cursor_vis_row.saturating_sub(scroll_offset) as u16;
-        let screen_col = cursor_vis_col as u16;
-
-        let final_row = inner.y + screen_row;
-        let final_col = inner.x + screen_col;
-
-        if final_row < inner.y + inner.height && final_col < inner.x + inner.width {
-            f.set_cursor_position((final_col, final_row));
-        }
-    }
+    render_text_editor(
+        f,
+        rows[1],
+        links_title,
+        links_text,
+        *links_cursor,
+        *focus == ConfigSection::ContextLinks,
+    );
 
     // -- Send prompts toggle --
     let toggle_border = if *focus == ConfigSection::SendPrompts {
@@ -1347,7 +1497,7 @@ fn render_configure(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
             .border_style(toggle_border)
             .title(" Options "),
     );
-    f.render_widget(toggle_widget, rows[1]);
+    f.render_widget(toggle_widget, rows[2]);
 
     // -- AI Reviewers section --
     let ai_border = if *focus == ConfigSection::AiReviewers {
@@ -1465,6 +1615,9 @@ fn render_footer(f: &mut Frame, area: Rect, wizard: &ReviewWizardState) {
         ReviewStep::Configure { focus, .. } => match focus {
             ConfigSection::Prompt => {
                 "Tab: next section | Shift+Enter: newline | Esc: back | Ctrl+C: quit"
+            }
+            ConfigSection::ContextLinks => {
+                "Paste PR/ticket URLs | Tab: next section | Shift+Enter: newline | Esc: back | Ctrl+C: quit"
             }
             ConfigSection::SendPrompts => {
                 "Space: toggle | Tab: next section | Enter: start review | Esc: back"
@@ -1606,9 +1759,8 @@ fn create_review_worktrees(
                                     .output()
                                 && mb_out.status.success()
                             {
-                                let merge_base = String::from_utf8_lossy(&mb_out.stdout)
-                                    .trim()
-                                    .to_string();
+                                let merge_base =
+                                    String::from_utf8_lossy(&mb_out.stdout).trim().to_string();
                                 if let Ok(diff_out) = Command::new("git")
                                     .args(["diff", &format!("{}..HEAD", merge_base)])
                                     .current_dir(&worktree_path)
@@ -1696,3 +1848,47 @@ fn create_review_worktrees(
     Ok(paths)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_context_appends_block_when_no_placeholder() {
+        let out = apply_context("Review the changes.", "PR: https://github.com/a/b/pull/1");
+        assert!(out.starts_with("Review the changes.\n\n## Related context\n\n"));
+        assert!(out.contains("PR: https://github.com/a/b/pull/1"));
+    }
+
+    #[test]
+    fn apply_context_replaces_placeholder() {
+        let out = apply_context(
+            "Intro.\n{{context}}\nOutro.",
+            "Issue: https://acme.atlassian.net/browse/SAMP-1",
+        );
+        assert!(!out.contains("{{context}}"));
+        assert!(out.contains("Issue: https://acme.atlassian.net/browse/SAMP-1"));
+        assert!(out.ends_with("Outro."));
+    }
+
+    #[test]
+    fn apply_context_no_links_leaves_template_untouched() {
+        assert_eq!(apply_context("Review.", "  "), "Review.");
+        assert_eq!(apply_context("A.\n{{context}}\nB.", ""), "A.\n\nB.");
+    }
+
+    #[test]
+    fn default_context_links_formats_pr_and_issues() {
+        let prs = vec![crate::pr::PrInfo {
+            branch: "feat/x".to_string(),
+            url: "https://github.com/a/b/pull/5".to_string(),
+            title: "Add x".to_string(),
+            issue_urls: vec!["https://github.com/a/b/issues/4".to_string()],
+        }];
+        let links = default_context_links(&prs, "feat/x");
+        assert_eq!(
+            links,
+            "PR: https://github.com/a/b/pull/5 — Add x\nIssue: https://github.com/a/b/issues/4"
+        );
+        assert_eq!(default_context_links(&prs, "other"), "");
+    }
+}

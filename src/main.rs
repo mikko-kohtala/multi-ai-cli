@@ -8,6 +8,7 @@ mod iterm2;
 mod iterm2_layout;
 mod picker;
 mod plan;
+mod pr;
 mod review;
 mod send;
 mod tmux;
@@ -407,10 +408,7 @@ fn interactive_remove_command(
     for prefix in &prefixes {
         let tmux_manager = TmuxManager::new(&project_name, prefix);
         match tmux_manager.kill_session() {
-            Ok(true) => println!(
-                "  ✓ Tmux session '{}-{}' removed",
-                project_name, prefix
-            ),
+            Ok(true) => println!("  ✓ Tmux session '{}-{}' removed", project_name, prefix),
             Ok(false) => {}
             Err(e) => eprintln!(
                 "  ⚠ Tmux session '{}-{}' cleanup: {}",
@@ -653,14 +651,12 @@ fn create_command(
                             .status();
                         match hook_result {
                             Ok(s) if s.success() => {}
-                            Ok(s) => eprintln!(
-                                "  Warning: postAdd hook '{}' exited with {}",
-                                cmd, s
-                            ),
-                            Err(e) => eprintln!(
-                                "  Warning: failed to run postAdd hook '{}': {}",
-                                cmd, e
-                            ),
+                            Ok(s) => {
+                                eprintln!("  Warning: postAdd hook '{}' exited with {}", cmd, s)
+                            }
+                            Err(e) => {
+                                eprintln!("  Warning: failed to run postAdd hook '{}': {}", cmd, e)
+                            }
                         }
                     }
 
