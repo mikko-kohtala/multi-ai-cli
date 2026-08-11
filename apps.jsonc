@@ -7,6 +7,7 @@
     "name": "claude",
     "slug": "claude",
     "command": "claude",
+    "default": true,
     "description": "Standard mode - asks for permission on all actions",
   },
   {
@@ -18,22 +19,21 @@
   {
     "name": "claude",
     "slug": "claude-sonnet-yolo",
-    "command": "claude --dangerously-skip-permissions --model sonnet --effort high",
+    "command": "claude --model sonnet --effort high",
     "meta_review": true,
     "description": "Skip all permissions - no safety checks",
   },
   {
     "name": "claude",
     "slug": "claude-haiku-yolo",
-    "command": "claude --dangerously-skip-permissions --model haiku --effort high",
+    "command": "claude --model haiku --effort high",
     "meta_review": false,
     "description": "Skip all permissions - no safety checks",
   },
   {
     "name": "claude",
     "slug": "claude-plan-yolo",
-    "command": "claude --permission-mode plan --allow-dangerously-skip-permissions --model opus --effort high",
-    "default": true,
+    "command": "claude --permission-mode plan --model opus --effort high",
     "meta_review": false,
     "description": "Plan mode with skip option - review first, skip if needed",
   },
@@ -54,6 +54,7 @@
     "slug": "codex",
     "command": "codex",
     "description": "Standard mode - asks for approval on each action",
+    "default": true,
   },
   {
     "name": "codex",
@@ -65,21 +66,18 @@
     "name": "codex",
     "slug": "codex-yolo-gpt-5.5-xhigh",
     "command": "codex --yolo --model gpt-5.5 --config model_reasoning_effort='xhigh'",
-    "default": false,
     "description": "YOLO + gpt-5.5 model - high reasoning with auto-approval",
   },
   {
     "name": "codex",
     "slug": "codex-yolo-gpt-5.5-medium",
     "command": "codex --yolo --model gpt-5.5 --config model_reasoning_effort='medium'",
-    "default": false,
     "description": "YOLO + gpt-5.5 model - medium reasoning with auto-approval",
   },
   {
     "name": "codex",
     "slug": "codex-yolo-gpt-5.3-codex",
     "command": "codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='high'",
-    "default": true,
     "description": "YOLO + gpt-5.3-codex model - high reasoning with auto-approval",
   },
   {
@@ -105,14 +103,12 @@
     "name": "amp",
     "slug": "amp-yolo",
     "command": "amp --dangerously-allow-all",
-    "default": false,
     "description": "Allow all operations - bypasses safety checks",
   },
   {
     "name": "opencode",
     "slug": "opencode",
     "command": "opencode",
-    "default": false,
     "description": "Standard mode - interactive approval workflow",
   },
   // opencode with github-copilot/claude-opus-4.6
@@ -140,7 +136,6 @@
     "name": "cursor-agent",
     "slug": "cursor-agent-force",
     "command": "cursor-agent --force",
-    "default": false,
     "description": "Force mode - executes without confirmation",
   },
   {
