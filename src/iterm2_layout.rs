@@ -80,6 +80,14 @@ fn run_it2(it2_path: &str, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Wrap text in bracketed-paste escape sequences so terminal apps (Claude
+/// Code, codex, etc.) treat it as one atomic paste. Without this, iTerm2 may
+/// deliver long text in multiple chunks and the receiving app's paste
+/// heuristics can split it, leaving the tail behind as literal keystrokes.
+fn bracketed_paste(text: &str) -> String {
+    format!("\x1b[200~{}\x1b[201~", text)
+}
+
 /// Parse an ID from it2 output like "Created new tab: W0:T42" or "Created new pane: <uuid>".
 fn parse_created_id(output: &str) -> Result<String> {
     output
@@ -170,20 +178,20 @@ pub fn create_iterm2_layout(spec: &LayoutSpec) -> Result<()> {
         for (i, col) in spec.columns.iter().enumerate() {
             match col.tag {
                 PaneTag::Ai => {
-                    // Send prompt with newline (auto-submits).
-                    run_it2(
-                        &it2,
-                        &["session", "run", "-s", &ai_panes[i], &spec.ai_prompt],
-                    )?;
+                    // Send prompt as an atomic bracketed paste (no newline yet).
+                    let pasted = bracketed_paste(&spec.ai_prompt);
+                    run_it2(&it2, &["session", "send", "-s", &ai_panes[i], &pasted])?;
                     thread::sleep(Duration::from_millis(500));
-                    // Send empty line to confirm (matches previous behavior).
+                    // Send newline to submit.
                     run_it2(&it2, &["session", "run", "-s", &ai_panes[i], ""])?;
                 }
                 PaneTag::Meta => {
                     if let Some(ref meta) = spec.meta_prompt {
                         thread::sleep(Duration::from_secs(1));
-                        // Send without newline so the user can review before pressing Enter.
-                        run_it2(&it2, &["session", "send", "-s", &ai_panes[i], meta])?;
+                        // Send as an atomic bracketed paste without newline so
+                        // the user can review before pressing Enter.
+                        let pasted = bracketed_paste(meta);
+                        run_it2(&it2, &["session", "send", "-s", &ai_panes[i], &pasted])?;
                     }
                 }
             }
