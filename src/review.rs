@@ -171,11 +171,7 @@ impl ReviewWizardState {
             && let Some(matched) = branches.iter().find(|bi| bi.name == b)
         {
             let source_branch = matched.name.clone();
-            let source_branch_ref = if matched.remote_only {
-                format!("origin/{}", matched.name)
-            } else {
-                matched.name.clone()
-            };
+            let source_branch_ref = review_ref(project_path, matched);
 
             let default_idx = branches
                 .iter()
@@ -268,6 +264,72 @@ fn filtered_branches<'a>(branches: &'a [BranchInfo], filter: &str) -> Vec<(usize
             .enumerate()
             .filter(|(_, b)| b.name.to_lowercase().contains(&lower))
             .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Review ref resolution
+// ---------------------------------------------------------------------------
+
+/// Git ref a review should check out for a branch: prefer `origin/<name>`
+/// whenever the branch exists on the remote, so reviews always cover what is
+/// actually pushed even if a stale local branch with the same name exists.
+/// Falls back to the local branch for local-only branches.
+fn review_ref(project_path: &Path, branch: &BranchInfo) -> String {
+    if branch.remote_only || remote_branch_exists(project_path, &branch.name) {
+        format!("origin/{}", branch.name)
+    } else {
+        branch.name.clone()
+    }
+}
+
+fn remote_branch_exists(project_path: &Path, branch: &str) -> bool {
+    Command::new("git")
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/remotes/origin/{}", branch),
+        ])
+        .current_dir(project_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Warn when the local branch has commits that the reviewed `origin/<name>`
+/// ref doesn't — those unpushed commits are excluded from the review.
+fn warn_if_local_ahead(project_path: &Path, branch: &str, review_ref: &str) {
+    if review_ref == branch {
+        return;
+    }
+    let Ok(out) = Command::new("git")
+        .args([
+            "rev-list",
+            "--count",
+            &format!("{}..{}", review_ref, branch),
+            "--",
+        ])
+        .current_dir(project_path)
+        .output()
+    else {
+        return;
+    };
+    if !out.status.success() {
+        // No local branch with this name (remote-only) — nothing to compare.
+        return;
+    }
+    let count: u64 = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    if count > 0 {
+        eprintln!(
+            "warning: local branch '{}' has {} unpushed commit(s); reviewing {} — those commits are excluded",
+            branch, count, review_ref
+        );
     }
 }
 
@@ -464,7 +526,7 @@ pub fn run_review(
     let review_prompt = apply_context(
         &wizard
             .review_prompt
-            .replace("{{base_branch}}", &wizard.base_branch),
+            .replace("{{base_branch}}", &wizard.base_branch_ref),
         &wizard.context_links,
     );
 
@@ -497,7 +559,7 @@ pub fn run_review(
             &settings
                 .meta_prompt_template
                 .replace("{{review_locations}}", &review_locations.join("\n"))
-                .replace("{{base_branch}}", &wizard.base_branch),
+                .replace("{{base_branch}}", &wizard.base_branch_ref),
             &wizard.context_links,
         ))
     } else {
@@ -540,6 +602,8 @@ pub fn run_review(
         }
     }
 
+    warn_if_local_ahead(&project_path, &wizard.source_branch, &wizard.source_branch_ref);
+
     // 7. Create worktrees in parallel
     println!("Creating review worktrees...");
     let worktree_paths = create_review_worktrees(
@@ -547,7 +611,7 @@ pub fn run_review(
         &branch_prefix,
         &review_apps,
         &wizard.source_branch_ref,
-        &wizard.base_branch,
+        &wizard.base_branch_ref,
         &project_config.hooks.post_add,
     )?;
     println!("All review worktrees created.");
@@ -699,11 +763,7 @@ fn handle_branch_input(wizard: &mut ReviewWizardState, key: KeyCode) {
                 let filtered = filtered_branches(branches, filter);
                 if let Some((_orig_idx, branch)) = filtered.get(*focused) {
                     wizard.source_branch = branch.name.clone();
-                    wizard.source_branch_ref = if branch.remote_only {
-                        format!("origin/{}", branch.name)
-                    } else {
-                        branch.name.clone()
-                    };
+                    wizard.source_branch_ref = review_ref(&wizard.project_path, branch);
 
                     let default_branch = git::get_default_branch(&wizard.project_path);
                     let all_branches = wizard.all_branches.clone();
@@ -777,11 +837,7 @@ fn handle_base_branch_input(wizard: &mut ReviewWizardState, key: KeyCode) {
                 let filtered = filtered_branches(branches, filter);
                 if let Some((_orig_idx, branch)) = filtered.get(*focused) {
                     wizard.base_branch = branch.name.clone();
-                    wizard.base_branch_ref = if branch.remote_only {
-                        format!("origin/{}", branch.name)
-                    } else {
-                        branch.name.clone()
-                    };
+                    wizard.base_branch_ref = review_ref(&wizard.project_path, branch);
 
                     let mut ai_selected: Vec<bool> = wizard
                         .review_services
@@ -1685,7 +1741,7 @@ fn create_review_worktrees(
     branch_prefix: &str,
     review_apps: &[AiApp],
     source_branch: &str,
-    base_branch: &str,
+    base_ref: &str,
     post_add_hooks: &[String],
 ) -> Result<Vec<(AiApp, String)>> {
     let worktree_paths = Arc::new(Mutex::new(Vec::new()));
@@ -1700,7 +1756,7 @@ fn create_review_worktrees(
         let project_path = worktree_manager.project_path().to_path_buf();
         let wt_path = worktree_manager.worktrees_path().to_path_buf();
         let source_branch = source_branch.to_string();
-        let base_branch = base_branch.to_string();
+        let base_ref = base_ref.to_string();
         let hooks = post_add_hooks.to_vec();
 
         let handle = thread::spawn(move || {
@@ -1748,13 +1804,9 @@ fn create_review_worktrees(
                             }
 
                             // Pre-compute merge-base diff (best-effort)
-                            if !base_branch.is_empty()
+                            if !base_ref.is_empty()
                                 && let Ok(mb_out) = Command::new("git")
-                                    .args([
-                                        "merge-base",
-                                        &format!("origin/{}", base_branch),
-                                        "HEAD",
-                                    ])
+                                    .args(["merge-base", &base_ref, "HEAD"])
                                     .current_dir(&worktree_path)
                                     .output()
                                 && mb_out.status.success()
