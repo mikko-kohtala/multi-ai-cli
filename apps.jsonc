@@ -18,23 +18,27 @@
   },
   {
     "name": "claude",
+    "slug": "claude-opus",
+    "command": "claude --model opus",
+    "meta_review": true,
+    "description": "Standard mode with Opus model",
+  },
+  {
+    "name": "claude",
     "slug": "claude-sonnet-yolo",
     "command": "claude --model sonnet --effort high",
-    "meta_review": true,
     "description": "Skip all permissions - no safety checks",
   },
   {
     "name": "claude",
     "slug": "claude-haiku-yolo",
     "command": "claude --model haiku --effort high",
-    "meta_review": false,
     "description": "Skip all permissions - no safety checks",
   },
   {
     "name": "claude",
     "slug": "claude-plan-yolo",
     "command": "claude --permission-mode plan --model opus --effort high",
-    "meta_review": false,
     "description": "Plan mode with skip option - review first, skip if needed",
   },
   {
@@ -116,14 +120,12 @@
     "name": "opencode",
     "slug": "opencode-opus",
     "command": "opencode --model github-copilot/claude-opus-4.6",
-    "default": true,
     "description": "Opencode with Claude Opus 4.6 - enhanced reasoning and code generation",
   },
   {
     "name": "opencode",
     "slug": "opencode-gpt-5.4",
     "command": "opencode --model openai/gpt-5.4",
-    "default": true,
     "description": "Opencode with GPT-5.4 - enhanced reasoning and code generation",
   },
   {
@@ -148,7 +150,6 @@
     "name": "copilot",
     "slug": "copilot-yolo",
     "command": "copilot --allow-all-tools",
-    "default": true,
     "description": "YOLO mode - auto-approve all tool calls",
   },
   {
