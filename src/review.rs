@@ -353,13 +353,18 @@ fn default_context_links(open_prs: &[crate::pr::PrInfo], branch: &str) -> String
     lines.join("\n")
 }
 
+/// Fallback context block used when no PR/ticket links were found or provided.
+/// Still asks the reviewer to go looking for the PR and ticket themselves.
+const FALLBACK_CONTEXT_BLOCK: &str = "## Related context\n\nNo PR or ticket links were detected for this branch. Before reviewing, try to find them yourself: check for an open pull request for this branch (e.g. `gh pr view`, `gh pr list --head <branch>`, or `az repos pr list --source-branch <branch>` on Azure DevOps), and look for ticket IDs (Jira, Linear, GitHub issues) in the branch name, commit messages, or PR description. If you find any, read the PR description and ticket to understand the intent behind these changes. If nothing is found, infer the intent from the diff and commit messages and state your assumptions in the review.";
+
 /// Inject the context links into a prompt template.
 /// If the template contains `{{context}}`, it is replaced with the context
-/// block (or removed when there are no links). Otherwise the block is appended.
+/// block. Otherwise the block is appended. When no links are available, a
+/// fallback block asking the reviewer to locate the PR/ticket is used instead.
 fn apply_context(template: &str, links: &str) -> String {
     let links = links.trim();
     let block = if links.is_empty() {
-        String::new()
+        FALLBACK_CONTEXT_BLOCK.to_string()
     } else {
         format!(
             "## Related context\n\n{}\n\nBefore reviewing, read the PR description and any linked issue/ticket above (e.g. `gh pr view <url>`, `gh issue view <url>`, or fetch the URL) to understand the intent behind these changes.",
@@ -369,8 +374,6 @@ fn apply_context(template: &str, links: &str) -> String {
 
     if template.contains(CONTEXT_PLACEHOLDER) {
         template.replace(CONTEXT_PLACEHOLDER, &block)
-    } else if block.is_empty() {
-        template.to_string()
     } else {
         format!("{}\n\n{}", template.trim_end(), block)
     }
@@ -602,7 +605,11 @@ pub fn run_review(
         }
     }
 
-    warn_if_local_ahead(&project_path, &wizard.source_branch, &wizard.source_branch_ref);
+    warn_if_local_ahead(
+        &project_path,
+        &wizard.source_branch,
+        &wizard.source_branch_ref,
+    );
 
     // 7. Create worktrees in parallel
     println!("Creating review worktrees...");
@@ -1923,9 +1930,15 @@ mod tests {
     }
 
     #[test]
-    fn apply_context_no_links_leaves_template_untouched() {
-        assert_eq!(apply_context("Review.", "  "), "Review.");
-        assert_eq!(apply_context("A.\n{{context}}\nB.", ""), "A.\n\nB.");
+    fn apply_context_no_links_uses_fallback_block() {
+        let out = apply_context("Review.", "  ");
+        assert!(out.starts_with("Review.\n\n## Related context\n\n"));
+        assert!(out.contains("No PR or ticket links were detected"));
+
+        let out = apply_context("A.\n{{context}}\nB.", "");
+        assert!(!out.contains("{{context}}"));
+        assert!(out.starts_with("A.\n## Related context\n\n"));
+        assert!(out.ends_with("\nB."));
     }
 
     #[test]

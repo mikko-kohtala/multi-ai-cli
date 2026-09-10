@@ -259,7 +259,7 @@ This will:
 2. Detect the branch's open PR via `gh` (best-effort) and pre-fill an editable **Context Links** field with the PR URL and any linked issues/tickets (GitHub issues, Jira, Linear) — paste additional URLs as needed
 3. Create review worktrees for each selected AI reviewer
 4. Generate a `CHANGES.diff` file in each worktree (merge-base diff)
-5. Send the review prompt to each AI tool, including a "Related context" block with the PR/issue links so reviewers read the PR description and ticket to understand intent
+5. Send the review prompt to each AI tool, including a "Related context" block with the PR/issue links so reviewers read the PR description and ticket to understand intent (if no links were detected or entered, a fallback block asks reviewers to locate the PR/ticket themselves)
 6. Each reviewer writes findings to `REVIEW.md`
 7. If a meta reviewer is selected, it synthesizes all reviews into:
    - `REVIEW_SUMMARY.md` — consolidated findings with per-tool attribution
