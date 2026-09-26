@@ -37,11 +37,11 @@ test:
 
 check:
 	@echo "→ Checking formatting..."
-	@cargo fmt -- --check
+	@cargo fmt --all --check
 	@echo "→ Running clippy..."
-	@cargo clippy --all-targets -- -D warnings
+	@cargo clippy --all-targets --locked -- -D warnings
 	@echo "→ Running tests..."
-	@cargo test
+	@cargo test --locked
 	@echo "✓ All checks passed"
 
 fmt:

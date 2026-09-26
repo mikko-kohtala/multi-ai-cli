@@ -148,49 +148,47 @@ impl PlanWizardState {
             .unwrap_or_else(|| DEFAULT_PLAN_PROMPT.to_string());
 
         // If a branch argument was given and matches exactly, skip to Configure
-        if let Some(b) = branch {
-            if let Some(matched) = branches.iter().find(|bi| bi.name == b) {
-                let source_branch = matched.name.clone();
-                let source_branch_ref = if matched.remote_only {
-                    format!("origin/{}", matched.name)
-                } else {
-                    matched.name.clone()
-                };
+        if let Some(b) = branch
+            && let Some(matched) = branches.iter().find(|bi| bi.name == b)
+        {
+            let source_branch = matched.name.clone();
+            let source_branch_ref = if matched.remote_only {
+                format!("origin/{}", matched.name)
+            } else {
+                matched.name.clone()
+            };
 
-                let mut ai_selected: Vec<bool> =
-                    plan_services.iter().map(|app| app.default).collect();
-                if !ai_selected.iter().any(|&s| s) && !ai_selected.is_empty() {
-                    ai_selected[0] = true;
-                }
-                let meta_selected: Vec<bool> =
-                    plan_services.iter().map(|a| a.meta_review).collect();
-
-                let prompt = default_prompt.clone();
-                let len = prompt.len();
-                return Self {
-                    current_step: PlanStep::Configure {
-                        focus: ConfigSection::TaskDescription,
-                        task_text: String::new(),
-                        task_cursor: 0,
-                        prompt_text: prompt,
-                        prompt_cursor: len,
-                        send_prompts: true,
-                        ai_selected,
-                        ai_focused: 0,
-                        meta_selected,
-                        meta_focused: 0,
-                    },
-                    history: Vec::new(),
-                    app_state: AppState::Running,
-                    plan_services,
-                    source_branch,
-                    source_branch_ref,
-                    task_description: String::new(),
-                    plan_prompt: default_prompt,
-                    send_prompts: true,
-                    selected_tools: Vec::new(),
-                };
+            let mut ai_selected: Vec<bool> = plan_services.iter().map(|app| app.default).collect();
+            if !ai_selected.iter().any(|&s| s) && !ai_selected.is_empty() {
+                ai_selected[0] = true;
             }
+            let meta_selected: Vec<bool> = plan_services.iter().map(|a| a.meta_review).collect();
+
+            let prompt = default_prompt.clone();
+            let len = prompt.len();
+            return Self {
+                current_step: PlanStep::Configure {
+                    focus: ConfigSection::TaskDescription,
+                    task_text: String::new(),
+                    task_cursor: 0,
+                    prompt_text: prompt,
+                    prompt_cursor: len,
+                    send_prompts: true,
+                    ai_selected,
+                    ai_focused: 0,
+                    meta_selected,
+                    meta_focused: 0,
+                },
+                history: Vec::new(),
+                app_state: AppState::Running,
+                plan_services,
+                source_branch,
+                source_branch_ref,
+                task_description: String::new(),
+                plan_prompt: default_prompt,
+                send_prompts: true,
+                selected_tools: Vec::new(),
+            };
         }
 
         Self {

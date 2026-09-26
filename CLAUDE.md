@@ -81,12 +81,8 @@ cargo test <test_name>  # Run specific test
 cargo test -- --nocapture # Show test output
 ```
 
-### Check & Lint
-```bash
-cargo check    # Quick compilation check without producing binary
-cargo clippy   # Rust linter with additional checks
-cargo fmt      # Format code according to Rust standards
-```
+## Validation
+Validate all work with `make check` (fmt, clippy, tests) before calling it done. `make fmt` applies formatting.
 
 ## Architecture
 

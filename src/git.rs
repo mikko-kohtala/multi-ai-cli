@@ -191,31 +191,30 @@ pub fn list_all_branches(path: &Path) -> Vec<BranchInfo> {
         .current_dir(path)
         .output();
 
-    if let Ok(out) = combined_output {
-        if out.status.success() {
-            let mut seen = std::collections::HashSet::new();
-            let mut sorted = Vec::new();
-            for line in String::from_utf8_lossy(&out.stdout).lines() {
-                if let Some((full_name, date)) = line.split_once('\t') {
-                    let short = full_name.strip_prefix("origin/").unwrap_or(full_name);
-                    if short == "HEAD" {
-                        continue;
-                    }
-                    if seen.contains(short) {
-                        continue;
-                    }
-                    seen.insert(short.to_string());
-                    let is_remote =
-                        full_name.starts_with("origin/") && !local_names.contains(short);
-                    sorted.push(BranchInfo {
-                        name: short.to_string(),
-                        date: date.to_string(),
-                        remote_only: is_remote,
-                    });
+    if let Ok(out) = combined_output
+        && out.status.success()
+    {
+        let mut seen = std::collections::HashSet::new();
+        let mut sorted = Vec::new();
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            if let Some((full_name, date)) = line.split_once('\t') {
+                let short = full_name.strip_prefix("origin/").unwrap_or(full_name);
+                if short == "HEAD" {
+                    continue;
                 }
+                if seen.contains(short) {
+                    continue;
+                }
+                seen.insert(short.to_string());
+                let is_remote = full_name.starts_with("origin/") && !local_names.contains(short);
+                sorted.push(BranchInfo {
+                    name: short.to_string(),
+                    date: date.to_string(),
+                    remote_only: is_remote,
+                });
             }
-            return sorted;
         }
+        return sorted;
     }
 
     // Fallback: concatenate local + remote without re-sorting

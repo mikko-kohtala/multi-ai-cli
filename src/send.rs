@@ -145,17 +145,17 @@ impl TuiState {
             },
             FocusedWindow::SessionList => match key {
                 KeyCode::Up => {
-                    if let Some(selected) = self.session_list_state.selected() {
-                        if selected > 0 {
-                            self.session_list_state.select(Some(selected - 1));
-                        }
+                    if let Some(selected) = self.session_list_state.selected()
+                        && selected > 0
+                    {
+                        self.session_list_state.select(Some(selected - 1));
                     }
                 }
                 KeyCode::Down => {
-                    if let Some(selected) = self.session_list_state.selected() {
-                        if selected < self.sessions.len() - 1 {
-                            self.session_list_state.select(Some(selected + 1));
-                        }
+                    if let Some(selected) = self.session_list_state.selected()
+                        && selected < self.sessions.len() - 1
+                    {
+                        self.session_list_state.select(Some(selected + 1));
                     }
                 }
                 KeyCode::Tab => self.focused = FocusedWindow::AppList,
@@ -163,10 +163,10 @@ impl TuiState {
             },
             FocusedWindow::AppList => match key {
                 KeyCode::Up => {
-                    if let Some(selected) = self.app_list_state.selected() {
-                        if selected > 0 {
-                            self.app_list_state.select(Some(selected - 1));
-                        }
+                    if let Some(selected) = self.app_list_state.selected()
+                        && selected > 0
+                    {
+                        self.app_list_state.select(Some(selected - 1));
                     }
                 }
                 KeyCode::Down => {
@@ -218,23 +218,23 @@ impl TuiState {
     }
 
     fn create_send_action(&self) -> Option<SendAction> {
-        if let Some(session_idx) = self.session_list_state.selected() {
-            if let Some(list_idx) = self.app_list_state.selected() {
-                let app_index = if list_idx == 0 {
-                    None
-                } else {
-                    Some(list_idx - 1)
-                };
+        if let Some(session_idx) = self.session_list_state.selected()
+            && let Some(list_idx) = self.app_list_state.selected()
+        {
+            let app_index = if list_idx == 0 {
+                None
+            } else {
+                Some(list_idx - 1)
+            };
 
-                return Some(SendAction {
-                    session_name: self.sessions[session_idx].clone(),
-                    app_index,
-                    target_type: self.target_type,
-                    text: self.input.clone(),
-                    ultrathink: self.ultrathink,
-                    apps: self.apps.clone(),
-                });
-            }
+            return Some(SendAction {
+                session_name: self.sessions[session_idx].clone(),
+                app_index,
+                target_type: self.target_type,
+                text: self.input.clone(),
+                ultrathink: self.ultrathink,
+                apps: self.apps.clone(),
+            });
         }
         None
     }
@@ -400,10 +400,8 @@ fn run_app(
                         state.confirm_clear = false;
                     }
 
-                    if state.focused != FocusedWindow::Input {
-                        if key.code == KeyCode::Char('q') {
-                            return Ok(());
-                        }
+                    if state.focused != FocusedWindow::Input && key.code == KeyCode::Char('q') {
+                        return Ok(());
                     }
 
                     // Handle Shift+Enter (and common fallbacks) as newline insertion before send logic
@@ -452,7 +450,7 @@ fn run_app(
                         let size = terminal
                             .size()
                             .map(|s| Rect::from((Position::default(), s)))
-                            .unwrap_or(Rect::default());
+                            .unwrap_or_default();
                         let rects = calculate_layout(size);
                         state.on_click(mouse.column, mouse.row, &rects);
                     }
@@ -809,11 +807,11 @@ fn execute_send_action(action: SendAction) -> Result<()> {
         if action.ultrathink && action.target_type == TargetType::Prompt {
             // We need to get the app corresponding to this column.
             // Assuming apps order matches column order.
-            if app_idx < action.apps.len() {
-                if let Some(ultra) = action.apps[app_idx].ultrathink() {
-                    final_text.push_str("\n\n");
-                    final_text.push_str(ultra);
-                }
+            if app_idx < action.apps.len()
+                && let Some(ultra) = action.apps[app_idx].ultrathink()
+            {
+                final_text.push_str("\n\n");
+                final_text.push_str(ultra);
             }
         }
 

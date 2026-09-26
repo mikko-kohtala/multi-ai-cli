@@ -198,56 +198,6 @@ pub(crate) fn slugify_command(command: &str) -> String {
     result.trim_end_matches('-').to_string()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::slugify_command;
-
-    #[test]
-    fn test_slugify_basic_commands() {
-        assert_eq!(slugify_command("claude"), "claude");
-        assert_eq!(slugify_command("gemini"), "gemini");
-        assert_eq!(slugify_command("codex"), "codex");
-    }
-
-    #[test]
-    fn test_slugify_yolo_variants() {
-        assert_eq!(slugify_command("gemini --yolo"), "gemini-yolo");
-        assert_eq!(slugify_command("codex --yolo"), "codex-yolo");
-        assert_eq!(
-            slugify_command("claude --dangerously-skip-permissions"),
-            "claude-yolo"
-        );
-        assert_eq!(slugify_command("amp --dangerously-allow-all"), "amp-yolo");
-        assert_eq!(slugify_command("copilot --allow-all-tools"), "copilot-yolo");
-        assert_eq!(
-            slugify_command("cursor-agent --force"),
-            "cursor-agent-force"
-        );
-    }
-
-    #[test]
-    fn test_slugify_permission_mode() {
-        assert_eq!(
-            slugify_command("claude --permission-mode plan --allow-dangerously-skip-permissions"),
-            "claude-plan-yolo"
-        );
-    }
-
-    #[test]
-    fn test_slugify_model_variants() {
-        assert_eq!(
-            slugify_command(
-                "codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='high'"
-            ),
-            "codex-yolo-gpt-5.3-codex"
-        );
-        assert_eq!(
-            slugify_command("codex --yolo --model gpt-5.1 --config model_reasoning_effort='high'"),
-            "codex-yolo-gpt-5.1"
-        );
-    }
-}
-
 /// Result of finding a config file
 /// Contains: (config_file_path, parsed_config, effective_project_path)
 pub type ConfigFindResult = (PathBuf, ProjectConfig, PathBuf);
@@ -405,5 +355,55 @@ impl ProjectConfig {
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slugify_command;
+
+    #[test]
+    fn test_slugify_basic_commands() {
+        assert_eq!(slugify_command("claude"), "claude");
+        assert_eq!(slugify_command("gemini"), "gemini");
+        assert_eq!(slugify_command("codex"), "codex");
+    }
+
+    #[test]
+    fn test_slugify_yolo_variants() {
+        assert_eq!(slugify_command("gemini --yolo"), "gemini-yolo");
+        assert_eq!(slugify_command("codex --yolo"), "codex-yolo");
+        assert_eq!(
+            slugify_command("claude --dangerously-skip-permissions"),
+            "claude-yolo"
+        );
+        assert_eq!(slugify_command("amp --dangerously-allow-all"), "amp-yolo");
+        assert_eq!(slugify_command("copilot --allow-all-tools"), "copilot-yolo");
+        assert_eq!(
+            slugify_command("cursor-agent --force"),
+            "cursor-agent-force"
+        );
+    }
+
+    #[test]
+    fn test_slugify_permission_mode() {
+        assert_eq!(
+            slugify_command("claude --permission-mode plan --allow-dangerously-skip-permissions"),
+            "claude-plan-yolo"
+        );
+    }
+
+    #[test]
+    fn test_slugify_model_variants() {
+        assert_eq!(
+            slugify_command(
+                "codex --yolo --model gpt-5.3-codex --config model_reasoning_effort='high'"
+            ),
+            "codex-yolo-gpt-5.3-codex"
+        );
+        assert_eq!(
+            slugify_command("codex --yolo --model gpt-5.1 --config model_reasoning_effort='high'"),
+            "codex-yolo-gpt-5.1"
+        );
     }
 }
