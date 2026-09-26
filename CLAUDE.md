@@ -1,30 +1,13 @@
-# CLAUDE.md
+# Multi-AI CLI
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+`mai`: a Rust CLI that sets up one git worktree per AI tool and opens them side by side in iTerm2 or tmux. Usage and config: README.md.
 
-## Project Overview
+## Adding AI tools
 
-Multi-AI CLI is a Rust tool that manages multiple AI development environments using git worktrees and tmux sessions. It automates the setup of separate worktrees for different AI tools and creates organized tmux or iTerm2 sessions for each.
-
-### Supported AI Tools
-
-The following AI development tools are supported:
-- **claude**: Anthropic's AI assistant (with `--dangerously-skip-permissions` flag for YOLO mode)
-- **gemini**: Google's AI assistant (with `--yolo` flag for YOLO mode)
-- **codex**: OpenAI Codex CLI (with `--yolo` flag for YOLO mode)
-- **amp**: AI assistant (with `--dangerously-allow-all` flag for YOLO mode)
-- **opencode**: AI coding assistant (no special flags for YOLO mode)
-- **cursor-agent**: Cursor AI assistant (with `--force` flag for YOLO mode)
-- **copilot**: GitHub Copilot CLI (with `--allow-all-tools` flag for YOLO mode)
-- **kilo**: Kilo Code CLI (interactive mode)
-- **cline**: Cline CLI (interactive mode)
-- **droid**: Factory CLI (interactive mode)
-
-**IMPORTANT**: When adding new AI tools, always update:
-1. `src/init.rs` - Add to AiService::SERVICES array
-2. `CLAUDE.md` - Add to this supported tools list
-3. `README.md` - Update the AI tools list
-4. `Cargo.toml` - Increment the version number
+When adding a new AI tool, always update:
+1. `apps.jsonc` - Add the tool and its command variants
+2. `README.md` - Update the AI tools list
+3. `Cargo.toml` - Increment the version number
 
 ## Version Management
 
@@ -33,110 +16,12 @@ The following AI development tools are supported:
 - Minor version (x.N.x) for new features
 - Major version (N.x.x) for breaking changes
 
-## Common Commands
-
-### Build
-```bash
-cargo build           # Debug build
-cargo build --release # Release build for production use
-```
-
-### Run
-
-**Config Discovery**: All configs live in `~/.config/multi-ai-cli/`, one file per project, named by git remote URL (e.g., `github_com_owner_repo.jsonc`). Discovery order:
-1. Git remote URL → generate filename → look up `~/.config/multi-ai-cli/{filename}.jsonc`
-2. Fallback: scan all `.jsonc` files for matching `project_path` or `worktrees_path`
-
-Each config requires a `project_path` field pointing to the main git repository.
-
-```bash
-# From any directory inside a git repo with a config in ~/.config/multi-ai-cli/:
-cargo run -- add <branch-prefix>             # Create worktrees and session
-cargo run -- add <branch-prefix> --tmux      # Use tmux instead of iTerm2
-cargo run -- remove <branch-prefix>          # Remove worktrees and session
-cargo run -- remove <branch-prefix> --tmux   # Remove tmux session
-cargo run -- continue <branch-prefix>        # Create new session/tab for existing worktrees
-cargo run -- resume <branch-prefix>          # Alias for continue
-
-# Or using the binary:
-mai add <branch-prefix>                      # Create worktrees and session
-mai add <branch-prefix> --tmux               # Use tmux instead of iTerm2
-mai remove <branch-prefix>                   # Remove worktrees and session
-mai remove <branch-prefix> --tmux            # Remove tmux session
-mai continue <branch-prefix>                 # Create new session/tab for existing worktrees
-mai resume <branch-prefix>                   # Alias for continue
-mai send                                     # Open TUI to send commands to sessions
-mai plan [branch]                            # Launch multi-AI collaborative planning
-mai plan input                               # Print last saved plan prompt
-mai plan meta                                # Print last saved meta planner prompt
-
-# Initialize a new config file:
-mai init                                      # Interactive setup, saves to ~/.config/multi-ai-cli/
-```
-
-### Test
-```bash
-cargo test              # Run all tests
-cargo test <test_name>  # Run specific test
-cargo test -- --nocapture # Show test output
-```
-
 ## Validation
 Validate all work with `make check` (fmt, clippy, tests) before calling it done. `make fmt` applies formatting.
 
-## Architecture
+## Gotchas
 
-### Core Flow
-1. **main.rs**: Entry point, handles CLI argument parsing via clap, orchestrates the add/remove commands
-   - Commands work from current directory, no project path argument needed
-   - Finds config in `~/.config/multi-ai-cli/` by git remote URL or path matching
-2. **config.rs**: Manages project configuration:
-   - `ProjectConfig`: Reads `multi-ai-config.jsonc` for AI apps list and `mode`
-   - `Mode`: enum for `iterm2`, `tmux-single-window`, `tmux-multi-window` (optional; defaults: macOS → iterm2, others → tmux-single-window)
-   - `TmuxLayout`: internal enum used by tmux adapter (`SingleWindow`, `MultiWindow`)
-   - `AiApp` struct: Defines AI tool name and full command to execute
-
-3. **worktree.rs**: `WorktreeManager` manages git worktrees directly via `git worktree` commands:
-   - Create git worktrees for each AI app with naming pattern: `<branch-prefix>-<ai-app>`
-   - Smart branch detection: handles existing local, remote-only, and new branches
-   - Remove worktrees and clean up branches during cleanup
-
-4. **iterm2.rs**: `ITerm2Manager` handles iTerm2 automation (default):
-   - Creates a single tab with all AI apps
-   - Each AI app gets horizontal split (top/bottom panes)
-   - Commands use `cd <path> && <command>` chaining for proper directory navigation
-   - Top pane launches the AI tool with custom command
-   - Bottom pane provides shell in worktree directory
-
-5. **tmux.rs**: `TmuxManager` handles tmux automation (with --tmux flag or config):
-   - Creates session named `<project>-<branch-prefix>`
-   - Supports two layouts:
-     - `tmux-multi-window`: one window per AI app, each split into two panes (left: AI, right: shell)
-     - `tmux-single-window`: single window `apps` with equal-width columns per app, each column split into two panes (top: AI, bottom: shell)
-   - Launch pane: original pane per app (left for multi_window, top for single_window) runs the AI tool (500ms delay before sending)
-   - Pane targeting uses `#{pane_id}` captured pre-split to avoid index assumptions
-
-6. **pr.rs**: Best-effort open-PR discovery via the GitHub CLI (`gh pr list`):
-   - Used by `mai review` to pre-fill the editable Context Links field with the source branch's PR URL and linked issue/ticket URLs (GitHub closing issues plus Jira/Linear/GitHub issue links scraped from the PR body)
-   - The links are injected into the review and meta prompts as a "Related context" block (or at the optional `{{context}}` placeholder) so AI reviewers read the PR description and ticket before reviewing. When no links are found (no open PR, non-GitHub host such as Azure DevOps, or `gh` unavailable), a fallback block is injected instead asking the reviewer to locate the PR/ticket themselves
-   - Fails silently (empty list) if `gh` is missing, unauthenticated, or the repo is not on GitHub
-
-7. **error.rs**: Custom error types using thiserror for structured error handling
-
-### Key Implementation Details
-
-- **Centralized Config**: All configs live in `~/.config/multi-ai-cli/`, named by git remote URL. Each config requires `project_path`.
-- **Required Files**: A mai config in `~/.config/multi-ai-cli/` must exist. Optional `worktrees_path` field controls where worktrees are created (defaults to project directory).
-- **Tmux Pane Targeting**: Capture `#{pane_id}` of the original pane before splitting and target by ID. This works regardless of `base-index`/`pane-base-index`.
-- **Mode Defaults by OS**: If not specified via CLI or config, defaults to iTerm2 on macOS and tmux single-window elsewhere.
-- **Shell Initialization**: A 500ms delay ensures the shell is ready before sending commands
-- **JSONC Support**: Configuration files use JSONC format (JSON with comments)
-
-### Dependencies
-- External tools: git, tmux
-- Key crates: clap (CLI), serde (serialization), jsonc-parser (JSONC support), thiserror (errors)
-
-## Known Issues & Fixes
-
-### Shell Initialization Timing
-Fixed by adding 500ms delay after pane creation to ensure shell is ready before sending commands.
+- Configs live outside the repo in `~/.config/multi-ai-cli/`, one `.jsonc` per project named from the git remote URL (e.g. `github_com_owner_repo.jsonc`), each with a required `project_path`. Fallback: a scan for a matching `project_path`/`worktrees_path`.
+- The repo's `apps.jsonc` is compiled in as the default. At runtime `~/.config/multi-ai-cli/apps.jsonc` wins; `make install` symlinks it to the repo copy unless a real file is already there.
+- Tmux: capture `#{pane_id}` of the original pane before splitting and target panes by ID, never by index, so it works regardless of `base-index`/`pane-base-index`.
+- Tmux: new panes need a 500ms delay before commands are sent, or the shell isn't ready.
