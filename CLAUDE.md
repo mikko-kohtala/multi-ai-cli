@@ -4,10 +4,7 @@
 
 ## Project workflow
 
-Before changing this repository, read and follow
-`.agents/skills/project-workflow/SKILL.md` from the repository root.
-
-Repository-specific instructions and explicit user directions take precedence.
+Before making changes, read and follow `.agents/skills/project-workflow/SKILL.md` from the repository root.
 
 ## Adding AI tools
 
