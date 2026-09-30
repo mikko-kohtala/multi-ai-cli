@@ -4,21 +4,17 @@
 
 ## Project workflow
 
-Before changing this repository, read and follow
-`.agents/skills/project-workflow/SKILL.md` from the repository root.
-
-Repository-specific instructions and explicit user directions take precedence.
+Before making changes, read and follow `.agents/skills/project-workflow/SKILL.md` from the repository root.
 
 ## Adding AI tools
 
 When adding a new AI tool, always update:
 1. `apps.jsonc` - Add the tool and its command variants
 2. `README.md` - Update the AI tools list
-3. `Cargo.toml` - Increment the version number
 
 ## Version Management
 
-**IMPORTANT**: Whenever making code changes, always increment the version in Cargo.toml:
+Code changes increment the version in Cargo.toml:
 - Patch version (x.x.N) for bug fixes and minor improvements
 - Minor version (x.N.x) for new features
 - Major version (N.x.x) for breaking changes
