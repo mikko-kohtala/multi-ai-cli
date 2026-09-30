@@ -2,6 +2,13 @@
 
 `mai`: a Rust CLI that sets up one git worktree per AI tool and opens them side by side in iTerm2 or tmux. Usage and config: README.md.
 
+## Project workflow
+
+Before changing this repository, read and follow
+`.agents/skills/project-workflow/SKILL.md` from the repository root.
+
+Repository-specific instructions and explicit user directions take precedence.
+
 ## Adding AI tools
 
 When adding a new AI tool, always update:
